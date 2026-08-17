@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>印度占星解读</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="app-header">
+      <h1>印度占星解读 <span class="sub">Vedic Astrology</span></h1>
+      <p class="tagline">本命盘计算 · Vimshottari 大运 · AI 深度解读</p>
+    </header>
+
+    <main>
+      <section id="form-section" class="card">
+        <h2>出生信息</h2>
+        <form id="birth-form">
+          <div class="field">
+            <label for="name">姓名 / 称呼（可选）</label>
+            <input type="text" id="name" placeholder="用于解读中称呼命主">
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="birth_date">出生日期</label>
+              <input type="date" id="birth_date" required>
+            </div>
+            <div class="field">
+              <label for="birth_time">出生时间</label>
+              <input type="time" id="birth_time" required>
+              <p class="hint">出生时间越精确，上升星座与宫位越准确</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="city">出生城市</label>
+            <div class="city-search">
+              <input type="text" id="city" placeholder="输入城市名，如：上海 / Beijing / New York" autocomplete="off">
+              <button type="button" id="search-btn">搜索</button>
+            </div>
+            <ul id="city-results" class="city-results hidden"></ul>
+            <p class="hint" id="city-selected"></p>
+          </div>
+
+          <button type="submit" id="submit-btn" class="primary-btn" disabled>生成命盘与解读</button>
+        </form>
+      </section>
+
+      <section id="loading" class="card hidden">
+        <div class="spinner"></div>
+        <p>正在计算星盘并生成解读，请稍候……</p>
+      </section>
+
+      <section id="error-box" class="card error hidden"></section>
+
+      <section id="result-section" class="hidden">
+        <div class="card" id="minor-banner-wrap"></div>
+
+        <div class="card">
+          <h2>本命盘概览</h2>
+          <div id="chart-table"></div>
+        </div>
+
+        <div class="card">
+          <h2>大运 / 小运 (Vimshottari Dasha)</h2>
+          <div id="dasha-info"></div>
+        </div>
+
+        <div class="card">
+          <h2>解读</h2>
+          <div class="tabs" id="tabs"></div>
+          <div class="tab-content" id="tab-content"></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>本解读基于吠陀占星学传统计算方法与 AI 生成，仅供参考，不构成医疗、法律或投资建议。</p>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
