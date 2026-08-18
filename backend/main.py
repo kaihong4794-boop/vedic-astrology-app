@@ -58,6 +58,7 @@ def _point_to_dict(p: astrology.Point) -> dict:
         "name": p.name,
         "name_zh": astrology.PLANET_NAMES_ZH.get(p.name, p.name),
         "sign": p.sign_name,
+        "sign_index": p.sign_index,
         "sign_degree": astrology.format_degree(p.sign_degree),
         "house": p.house,
         "nakshatra": p.nakshatra_name,
@@ -129,6 +130,7 @@ def api_chart(req: ChartRequest):
     ][:4]
 
     return {
+        "name": req.name,
         "is_minor": is_minor,
         "age": round(age, 1),
         "ascendant": _point_to_dict(chart.ascendant),

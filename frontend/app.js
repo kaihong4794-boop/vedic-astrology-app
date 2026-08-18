@@ -1,6 +1,22 @@
 (() => {
   const $ = (sel) => document.querySelector(sel);
 
+  // South Indian style chart: signs sit at fixed grid positions (col, row)
+  // in a 4x4 grid with the center 2x2 block left open. Index 0 = Aries.
+  const SIGN_GRID_POS = [
+    [1, 0], [2, 0], [3, 0], // Aries, Taurus, Gemini
+    [3, 1], // Cancer
+    [3, 2], // Leo
+    [3, 3], [2, 3], [1, 3], [0, 3], // Virgo, Libra, Scorpio, Sagittarius
+    [0, 2], // Capricorn
+    [0, 1], // Aquarius
+    [0, 0], // Pisces
+  ];
+  const SIGN_SHORT = [
+    "白羊", "金牛", "双子", "巨蟹", "狮子", "处女",
+    "天秤", "天蝎", "射手", "摩羯", "水瓶", "双鱼",
+  ];
+
   const form = $("#birth-form");
   const cityInput = $("#city");
   const searchBtn = $("#search-btn");
@@ -123,12 +139,80 @@
       bannerWrap.appendChild(div);
     }
 
+    renderTagline(data.interpretation.tagline, data.is_minor);
+    renderChartWheel(data);
     renderChartTable(data);
     renderDasha(data.dasha);
     renderTabs(data.interpretation, data.is_minor);
+    prepareShareCard(data);
 
     resultEl.classList.remove("hidden");
     resultEl.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function renderTagline(tagline, isMinor) {
+    const wrap = $("#tagline-wrap");
+    if (!tagline) {
+      wrap.innerHTML = "";
+      return;
+    }
+    wrap.innerHTML = `<p class="tagline-quote">${isMinor ? "" : "“"}${tagline}${
+      isMinor ? "" : "”"
+    }</p>`;
+  }
+
+  function renderChartWheel(data) {
+    const ascSignIndex = data.ascendant.sign_index;
+    // group points by sign index, ascendant included as its own labeled point
+    const bySign = Array.from({ length: 12 }, () => []);
+    bySign[ascSignIndex].push({ label: "Asc", isAsc: true });
+    for (const p of data.planets) {
+      bySign[p.sign_index].push({ label: p.name_zh, isAsc: false });
+    }
+
+    const CELL = 96;
+    const PAD = 6;
+    const SIZE = CELL * 4 + PAD * 2;
+    const LINE_H = 15;
+    let cells = "";
+    for (let signIdx = 0; signIdx < 12; signIdx++) {
+      const [col, row] = SIGN_GRID_POS[signIdx];
+      const x = PAD + col * CELL;
+      const y = PAD + row * CELL;
+      const house = ((signIdx - ascSignIndex + 12) % 12) + 1;
+      const isAscCell = signIdx === ascSignIndex;
+      const points = bySign[signIdx];
+
+      cells += `<rect x="${x}" y="${y}" width="${CELL}" height="${CELL}"
+        class="wheel-cell${isAscCell ? " wheel-cell-asc" : ""}" />`;
+      if (isAscCell) {
+        cells += `<line x1="${x}" y1="${y}" x2="${x + CELL}" y2="${y + CELL}" class="wheel-asc-mark" />`;
+      }
+      cells += `<text x="${x + 6}" y="${y + 14}" class="wheel-sign-label">${SIGN_SHORT[signIdx]}</text>`;
+      cells += `<text x="${x + CELL - 6}" y="${y + 14}" text-anchor="end" class="wheel-house-label">${house}</text>`;
+
+      // vertically center the stack of point labels within the cell
+      const startY = y + CELL / 2 - ((points.length - 1) * LINE_H) / 2 + 5;
+      points.forEach((pt, i) => {
+        cells += `<text x="${x + CELL / 2}" y="${startY + i * LINE_H}"
+          text-anchor="middle" class="wheel-point-label${pt.isAsc ? " wheel-point-asc" : ""}">${pt.label}</text>`;
+      });
+    }
+
+    // center block spans the middle 2x2 area (columns/rows 1-2)
+    const centerX = PAD + CELL * 1;
+    const centerY = PAD + CELL * 1;
+    const centerW = CELL * 2;
+    const centerLabel = `${data.ascendant.sign} ${data.ascendant.sign_degree}`;
+
+    const svg = `<svg viewBox="0 0 ${SIZE} ${SIZE}" class="wheel-svg" role="img" aria-label="本命盘星位图">
+      ${cells}
+      <rect x="${centerX}" y="${centerY}" width="${centerW}" height="${centerW}" class="wheel-center" />
+      <text x="${centerX + centerW / 2}" y="${centerY + centerW / 2 - 6}" text-anchor="middle" class="wheel-center-title">上升 Lagna</text>
+      <text x="${centerX + centerW / 2}" y="${centerY + centerW / 2 + 16}" text-anchor="middle" class="wheel-center-sub">${centerLabel}</text>
+    </svg>`;
+
+    $("#chart-wheel").innerHTML = svg;
   }
 
   function renderChartTable(data) {
@@ -203,4 +287,131 @@
       if (i === 0) activate(t.key);
     });
   }
+
+  function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+    const chars = [...text];
+    let line = "";
+    let lines = [];
+    for (const ch of chars) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    lines.forEach((l, i) => ctx.fillText(l, x, y + i * lineHeight));
+    return lines.length * lineHeight;
+  }
+
+  function prepareShareCard(data) {
+    const canvas = $("#share-canvas");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width;
+    const H = canvas.height;
+    const FONT = `"PingFang SC", "Microsoft YaHei", sans-serif`;
+
+    // night-sky gradient background
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    grad.addColorStop(0, "#151030");
+    grad.addColorStop(1, "#0b0916");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+
+    // scattered stars
+    ctx.fillStyle = "rgba(255,255,255,0.55)";
+    for (let i = 0; i < 90; i++) {
+      const sx = Math.random() * W;
+      const sy = Math.random() * H * 0.7;
+      const r = Math.random() * 1.4 + 0.3;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const marginX = 56;
+
+    // eyebrow
+    ctx.fillStyle = "#d3ac6c";
+    ctx.font = `600 22px ${FONT}`;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillText("VEDIC ASTROLOGY · 命盘速览", marginX, 96);
+
+    ctx.strokeStyle = "rgba(211,172,108,0.5)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(marginX, 116);
+    ctx.lineTo(W - marginX, 116);
+    ctx.stroke();
+
+    // name + ascendant
+    const displayName = data.name || "命主";
+    ctx.fillStyle = "#f2eefb";
+    ctx.font = `600 40px ${FONT}`;
+    ctx.fillText(displayName, marginX, 176);
+
+    ctx.fillStyle = "#b6a9d6";
+    ctx.font = `26px ${FONT}`;
+    ctx.fillText(
+      `上升 ${data.ascendant.sign} ${data.ascendant.sign_degree} · ${data.ascendant.nakshatra}`,
+      marginX,
+      214
+    );
+
+    // tagline hero
+    ctx.fillStyle = "#f2eefb";
+    ctx.font = `600 44px ${FONT}`;
+    const taglineY = 320;
+    const taglineHeight = wrapCanvasText(
+      ctx,
+      `「${data.interpretation.tagline || ""}」`,
+      marginX,
+      taglineY,
+      W - marginX * 2,
+      58
+    );
+
+    // dasha info
+    const dashaY = taglineY + taglineHeight + 70;
+    ctx.fillStyle = "#d3ac6c";
+    ctx.font = `600 20px ${FONT}`;
+    ctx.fillText("当前大运 · 小运", marginX, dashaY);
+
+    ctx.fillStyle = "#f2eefb";
+    ctx.font = `600 32px ${FONT}`;
+    ctx.fillText(
+      `${data.dasha.mahadasha.lord_zh} — ${data.dasha.antardasha.lord_zh}`,
+      marginX,
+      dashaY + 44
+    );
+
+    ctx.fillStyle = "#8f81b3";
+    ctx.font = `20px ${FONT}`;
+    ctx.fillText(
+      `${data.dasha.antardasha.start} 至 ${data.dasha.antardasha.end}`,
+      marginX,
+      dashaY + 76
+    );
+
+    // footer
+    ctx.strokeStyle = "rgba(211,172,108,0.3)";
+    ctx.beginPath();
+    ctx.moveTo(marginX, H - 90);
+    ctx.lineTo(W - marginX, H - 90);
+    ctx.stroke();
+
+    ctx.fillStyle = "#8f81b3";
+    ctx.font = `18px ${FONT}`;
+    ctx.fillText("吠陀占星解读 · 本命盘 + Vimshottari 大运 + AI 生成", marginX, H - 56);
+  }
+
+  $("#download-share-btn").addEventListener("click", () => {
+    const canvas = $("#share-canvas");
+    const link = document.createElement("a");
+    link.download = "astrology-share-card.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  });
 })();

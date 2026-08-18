@@ -185,6 +185,98 @@ button {
   color: var(--accent-2);
 }
 
+#tagline-wrap:empty { display: none; padding: 0; margin: 0; border: none; }
+.tagline-quote {
+  margin: 0;
+  font-size: 1.15rem;
+  line-height: 1.6;
+  color: var(--accent);
+  text-align: center;
+  font-weight: 600;
+}
+
+#chart-wheel {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+.wheel-svg {
+  width: 100%;
+  max-width: 360px;
+  height: auto;
+}
+.wheel-cell {
+  fill: var(--bg-card-2);
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.wheel-cell-asc {
+  fill: rgba(180, 140, 255, 0.14);
+  stroke: var(--accent);
+}
+.wheel-asc-mark {
+  stroke: var(--accent);
+  stroke-width: 1;
+  opacity: 0.6;
+}
+.wheel-center {
+  fill: var(--bg-card);
+  stroke: var(--border);
+}
+.wheel-sign-label {
+  font-size: 9px;
+  fill: var(--text-dim);
+}
+.wheel-house-label {
+  font-size: 9px;
+  fill: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.wheel-point-label {
+  font-size: 12px;
+  fill: var(--text);
+}
+.wheel-point-asc {
+  fill: var(--accent-2);
+  font-weight: 700;
+}
+.wheel-center-title {
+  font-size: 11px;
+  fill: var(--text-dim);
+}
+.wheel-center-sub {
+  font-size: 13px;
+  fill: var(--accent);
+  font-weight: 600;
+}
+
+details.chart-toggle {
+  margin-top: 4px;
+}
+details.chart-toggle summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  padding: 6px 0;
+  user-select: none;
+}
+details.chart-toggle[open] summary {
+  margin-bottom: 8px;
+}
+
+.share-card-wrap {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 16px;
+}
+#share-canvas {
+  width: 100%;
+  max-width: 320px;
+  height: auto;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
 table.chart-table {
   width: 100%;
   border-collapse: collapse;

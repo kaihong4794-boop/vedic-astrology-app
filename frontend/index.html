@@ -58,9 +58,15 @@
       <section id="result-section" class="hidden">
         <div class="card" id="minor-banner-wrap"></div>
 
+        <div class="card" id="tagline-wrap"></div>
+
         <div class="card">
           <h2>本命盘概览</h2>
-          <div id="chart-table"></div>
+          <div id="chart-wheel"></div>
+          <details class="chart-toggle">
+            <summary>查看完整星位表</summary>
+            <div id="chart-table"></div>
+          </details>
         </div>
 
         <div class="card">
@@ -72,6 +78,15 @@
           <h2>解读</h2>
           <div class="tabs" id="tabs"></div>
           <div class="tab-content" id="tab-content"></div>
+        </div>
+
+        <div class="card">
+          <h2>分享卡</h2>
+          <p class="hint">生成一张可以保存分享的摘要卡片</p>
+          <div class="share-card-wrap">
+            <canvas id="share-canvas" width="720" height="760"></canvas>
+          </div>
+          <button type="button" id="download-share-btn" class="primary-btn">下载分享卡</button>
         </div>
       </section>
     </main>

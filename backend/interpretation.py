@@ -21,12 +21,17 @@ def _get_client() -> anthropic.Anthropic:
 OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
+        "tagline": {
+            "type": "string",
+            "description": "一句可独立摘出、适合截图分享的金句（不超过28个汉字），"
+            "提炼命盘中最具辨识度的一点特质或当前运势的一个亮点，语气生动、不落俗套",
+        },
         "personality": {"type": "string", "description": "性格板块解读"},
         "wealth": {"type": "string", "description": "财富板块解读"},
         "relationship": {"type": "string", "description": "感情/人际板块解读"},
         "current_period": {"type": "string", "description": "近况/当前大运小运板块解读"},
     },
-    "required": ["personality", "wealth", "relationship", "current_period"],
+    "required": ["tagline", "personality", "wealth", "relationship", "current_period"],
     "additionalProperties": False,
 }
 
@@ -59,9 +64,9 @@ def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None)
         f"{who}"
         f"本命盘数据：\n{chart_summary}\n\n"
         f"当前大运/小运数据：\n{dasha_summary}\n\n"
-        "请分四个板块生成解读：性格(personality)、财富(wealth)、感情或人际(relationship)、"
-        "近况(current_period，需结合当前大运/小运说明近期整体运势走向与需要关注的重点)。"
-        "每个板块正文约200-350字。"
+        "请生成：一句话金句(tagline)，以及四个板块——性格(personality)、财富(wealth)、"
+        "感情或人际(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势"
+        "走向与需要关注的重点)。每个板块正文约200-350字。"
     )
 
 
@@ -73,8 +78,11 @@ def generate_interpretation(
 ) -> dict:
     client = _get_client()
     response = client.messages.create(
+        # max_tokens covers thinking + the JSON response together (thinking is
+        # on by default for claude-opus-5), so this needs real headroom —
+        # too tight a budget silently truncates the JSON mid-field.
         model=MODEL,
-        max_tokens=4096,
+        max_tokens=8192,
         system=_build_system_prompt(is_minor),
         output_config={
             "effort": "medium",
@@ -84,5 +92,10 @@ def generate_interpretation(
             {"role": "user", "content": _build_user_prompt(chart_summary, dasha_summary, name)}
         ],
     )
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("生成的内容被截断（超出 max_tokens），请重试")
     text = next(b.text for b in response.content if b.type == "text")
-    return json.loads(text)
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"AI 返回的内容不是合法 JSON: {exc}") from exc
