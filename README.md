@@ -54,16 +54,31 @@ uvicorn main:app --reload --port 8000
 
 ```
 backend/
-  main.py            FastAPI 路由：/api/geocode /api/chart，托管前端静态文件
+  main.py            FastAPI 路由：/api/geocode /api/chart /admin，托管前端静态文件
   astrology.py        本命盘计算（Lahiri 恒星黄道，整宫制宫位）
   dasha.py             Vimshottari 大运/小运计算
   geocode.py           城市名 -> 经纬度 -> 时区
-  interpretation.py    构建提示词并调用 Claude API 生成四板块解读
+  interpretation.py    构建提示词并调用 Claude API 生成四板块解读+金句
+  db.py                记录每次生成结果（供 /admin 查看），Postgres/SQLite
   requirements.txt
 frontend/
   index.html / style.css / app.js   单页应用
 render.yaml            Render 一键部署配置
 ```
+
+## 后台记录（/admin）
+
+每次成功生成解读都会被记录下来（时间、姓名、出生信息、是否未成年、金句、完整四
+板块解读），访问 `/admin` 可以查看历史记录列表。
+
+- **需要密码**：设置环境变量 `ADMIN_PASSWORD` 才能访问，用户名固定为 `admin`。
+  没设置这个变量的话 `/admin` 会直接返回 503，禁止访问。
+- **数据存储**：优先读取 `DATABASE_URL`（Postgres 连接串）；没设置的话会退化成
+  本地 SQLite 文件 `backend/local_readings.db`。**Render 的免费 Web Service 没有
+  持久化磁盘**，每次重新部署都会清空文件系统，所以线上想真正保留记录，必须配置
+  Postgres（见下方部署说明）。
+- 记录的数据包含姓名、出生日期/时间/地点这类个人信息，未成年人的数据也会被记录。
+  `/admin` 的密码要妥善保管，不要分享给不该看到这些数据的人。
 
 ## 部署到 Render
 
@@ -73,9 +88,21 @@ render.yaml            Render 一键部署配置
    （如果不用 Blueprint，也可以手动创建 Web Service：Root Directory 填 `backend`，
    Build Command 填 `pip install -r requirements.txt`，
    Start Command 填 `uvicorn main:app --host 0.0.0.0 --port $PORT`。）
-3. 在 Render 服务的 Environment 页面添加环境变量 `ANTHROPIC_API_KEY`（必填）
-   和 `CLAUDE_MODEL`（可选，默认 `claude-opus-5`）。
-4. 部署完成后 Render 会给一个 `https://xxx.onrender.com` 的域名，即可直接使用。
+3. 在 Render 服务的 Environment 页面添加环境变量：
+   - `ANTHROPIC_API_KEY`（必填）
+   - `CLAUDE_MODEL`（可选，默认 `claude-opus-5`）
+   - `ADMIN_PASSWORD`（可选，要用 `/admin` 后台的话必填，自己起一个密码）
+   - `PYTHON_VERSION` = `3.11.16`（重要，否则 `pyswisseph` 可能要现场编译，构建变慢）
+
+   > **填 Value 的时候要小心**：每个环境变量的 Value 框里只填这一个值本身，
+   > 不要把 `.env` 文件里的好几行一起粘进同一个框——粘多了会导致值里混进换行符，
+   > 请求会莫名其妙地失败（这是本项目部署时真实踩过的坑）。
+4. 如果要用 `/admin` 后台记录功能，还需要建一个 Postgres 数据库：Render 项目页面
+   点 "New +" → "Postgres"，建好后复制它的 **Internal Database URL**，回到
+   Web Service 的 Environment 页面新增一个环境变量 `DATABASE_URL`，粘贴这个连接
+   串。注意 Render 免费版 Postgres 通常有 30 天有效期，到期后需要重新创建并更新
+   `DATABASE_URL`。不需要后台记录功能的话可以跳过这一步。
+5. 部署完成后 Render 会给一个 `https://xxx.onrender.com` 的域名，即可直接使用。
 
 免费套餐说明：Render 免费实例闲置一段时间后会休眠，首次访问需要几十秒唤醒；如需稳定
 可用，升级到付费套餐。

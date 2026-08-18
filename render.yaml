@@ -1,3 +1,7 @@
+databases:
+  - name: vedic-astrology-db
+    plan: free
+
 services:
   - type: web
     name: vedic-astrology
@@ -13,3 +17,9 @@ services:
         value: claude-opus-5
       - key: PYTHON_VERSION
         value: 3.11.16
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: vedic-astrology-db
+          property: connectionString

@@ -110,6 +110,7 @@
       name: $("#name").value.trim() || null,
       birth_date: $("#birth_date").value,
       birth_time: $("#birth_time").value,
+      birth_place: selectedCity.display_name,
       lat: selectedCity.lat,
       lon: selectedCity.lon,
       timezone: selectedCity.timezone,

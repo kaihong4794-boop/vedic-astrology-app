@@ -73,21 +73,29 @@ def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None)
     )
 
 
-def generate_interpretation(
-    chart_summary: str,
-    dasha_summary: str,
-    is_minor: bool,
-    name: str | None = None,
-) -> dict:
-    client = _get_client()
+# Minimum acceptable length per field (chars). tagline is intentionally short
+# (<=28 Chinese characters by design) so it needs a much lower bar than the
+# four long-form sections, which always run several hundred characters.
+_MIN_FIELD_LENGTH = {
+    "tagline": 5,
+    "personality": 80,
+    "wealth": 80,
+    "relationship": 80,
+    "current_period": 80,
+}
 
+
+def _call_claude(chart_summary: str, dasha_summary: str, is_minor: bool, name: str | None) -> dict:
+    client = _get_client()
     try:
         response = client.messages.create(
             # max_tokens covers thinking + the JSON response together (thinking
             # is on by default for claude-opus-5), so this needs real headroom
-            # — too tight a budget silently truncates the JSON mid-field.
+            # — too tight a budget silently truncates the JSON mid-field, and
+            # the API doesn't always report that as stop_reason=="max_tokens"
+            # (see _is_incomplete below).
             model=MODEL,
-            max_tokens=8192,
+            max_tokens=16000,
             system=_build_system_prompt(is_minor),
             output_config={
                 "effort": "medium",
@@ -111,9 +119,33 @@ def generate_interpretation(
         )
         raise
     if response.stop_reason == "max_tokens":
-        raise RuntimeError("生成的内容被截断（超出 max_tokens），请重试")
+        raise RuntimeError("生成的内容被截断（超出 max_tokens）")
     text = next(b.text for b in response.content if b.type == "text")
     try:
         return json.loads(text)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"AI 返回的内容不是合法 JSON: {exc}") from exc
+
+
+def _is_incomplete(reading: dict) -> bool:
+    return any(
+        len(reading.get(field) or "") < min_len for field, min_len in _MIN_FIELD_LENGTH.items()
+    )
+
+
+def generate_interpretation(
+    chart_summary: str,
+    dasha_summary: str,
+    is_minor: bool,
+    name: str | None = None,
+) -> dict:
+    for attempt in range(2):
+        reading = _call_claude(chart_summary, dasha_summary, is_minor, name)
+        if not _is_incomplete(reading):
+            return reading
+        logger.warning(
+            "interpretation looked truncated on attempt %d (lengths: %s), retrying",
+            attempt + 1,
+            {k: len(reading.get(k) or "") for k in _MIN_FIELD_LENGTH},
+        )
+    raise RuntimeError("生成的内容多次不完整，请重试")
