@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 
 import anthropic
 import httpx
+
+logger = logging.getLogger("vedic_astrology.interpretation")
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 
@@ -94,21 +97,42 @@ def generate_interpretation(
     name: str | None = None,
 ) -> dict:
     client = _get_client()
-    response = client.messages.create(
-        # max_tokens covers thinking + the JSON response together (thinking is
-        # on by default for claude-opus-5), so this needs real headroom —
-        # too tight a budget silently truncates the JSON mid-field.
-        model=MODEL,
-        max_tokens=8192,
-        system=_build_system_prompt(is_minor),
-        output_config={
-            "effort": "medium",
-            "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
-        },
-        messages=[
-            {"role": "user", "content": _build_user_prompt(chart_summary, dasha_summary, name)}
-        ],
-    )
+
+    try:
+        addrs = socket.getaddrinfo("api.anthropic.com", 443)
+        logger.info("DIAG dns api.anthropic.com -> %s", [a[4] for a in addrs])
+    except Exception as dns_exc:  # noqa: BLE001
+        logger.error("DIAG dns FAILED for api.anthropic.com: %r", dns_exc)
+
+    try:
+        response = client.messages.create(
+            # max_tokens covers thinking + the JSON response together (thinking
+            # is on by default for claude-opus-5), so this needs real headroom
+            # — too tight a budget silently truncates the JSON mid-field.
+            model=MODEL,
+            max_tokens=8192,
+            system=_build_system_prompt(is_minor),
+            output_config={
+                "effort": "medium",
+                "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA},
+            },
+            messages=[
+                {
+                    "role": "user",
+                    "content": _build_user_prompt(chart_summary, dasha_summary, name),
+                }
+            ],
+        )
+    except Exception as exc:  # noqa: BLE001
+        cause = exc.__cause__ or exc.__context__
+        logger.error(
+            "DIAG claude call failed: %s: %s | cause: %s: %s",
+            type(exc).__name__,
+            exc,
+            type(cause).__name__ if cause else None,
+            cause,
+        )
+        raise
     if response.stop_reason == "max_tokens":
         raise RuntimeError("生成的内容被截断（超出 max_tokens），请重试")
     text = next(b.text for b in response.content if b.type == "text")
