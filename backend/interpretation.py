@@ -3,18 +3,35 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 
 import anthropic
+import httpx
 
 MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 
 _client: anthropic.Anthropic | None = None
 
+# Some PaaS containers (e.g. Render's free tier) advertise IPv6 connectivity
+# that is not actually routed, so httpx can hang/fail connecting to a host's
+# AAAA record before ever trying its working IPv4 address. Force IPv4-only
+# DNS resolution process-wide to avoid spurious "Connection error"s.
+_orig_getaddrinfo = socket.getaddrinfo
+
+
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+
+socket.getaddrinfo = _ipv4_only_getaddrinfo
+
 
 def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        _client = anthropic.Anthropic()
+        _client = anthropic.Anthropic(
+            http_client=httpx.Client(transport=httpx.HTTPTransport(retries=2))
+        )
     return _client
 
 

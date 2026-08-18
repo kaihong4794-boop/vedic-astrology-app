@@ -1,9 +1,12 @@
 """FastAPI backend for the Vedic astrology reading web app."""
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime, timezone as dt_timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger("vedic_astrology")
 
 from dotenv import load_dotenv
 
@@ -116,6 +119,7 @@ def api_chart(req: ChartRequest):
             chart_summary, dasha_summary, is_minor, req.name
         )
     except Exception as exc:  # noqa: BLE001
+        logger.exception("interpretation generation failed")
         raise HTTPException(502, f"生成解读失败: {exc}") from exc
 
     order = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]

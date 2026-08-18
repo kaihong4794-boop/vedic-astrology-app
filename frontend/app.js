@@ -88,7 +88,11 @@
   $("#birth_time").addEventListener("change", updateSubmitState);
 
   document.addEventListener("click", (e) => {
-    if (!cityResults.contains(e.target) && e.target !== cityInput) {
+    if (
+      !cityResults.contains(e.target) &&
+      e.target !== cityInput &&
+      e.target !== searchBtn
+    ) {
       cityResults.classList.add("hidden");
     }
   });
