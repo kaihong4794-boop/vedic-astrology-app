@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 
 import anthropic
 
@@ -153,6 +154,40 @@ def _call_claude(chart_summary: str, dasha_summary: str, is_minor: bool, name: s
         raise RuntimeError(f"AI 返回的内容不是合法 JSON: {exc}") from exc
 
 
+# Transient Claude API failures worth a quick automatic retry: rate limits
+# and momentary server-side overload/5xx (529 is Anthropic's "overloaded_error").
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
+_API_RETRY_BACKOFF_SECONDS = 3
+
+
+def _call_claude_with_retry(
+    chart_summary: str, dasha_summary: str, is_minor: bool, name: str | None
+) -> dict:
+    """Wrap _call_claude with one short retry for transient API errors, so a
+    momentary "servers are busy" blip doesn't get dumped on the user as raw
+    API error JSON — they see a plain-language message only if it's still
+    failing after the retry.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            return _call_claude(chart_summary, dasha_summary, is_minor, name)
+        except anthropic.APIConnectionError as exc:
+            last_exc = exc
+        except anthropic.APIStatusError as exc:
+            if exc.status_code not in _RETRYABLE_STATUS_CODES:
+                raise RuntimeError("生成解读失败，请稍后重试") from exc
+            last_exc = exc
+        if attempt == 0:
+            logger.warning(
+                "Claude API call hit a transient error, retrying in %ds: %s",
+                _API_RETRY_BACKOFF_SECONDS,
+                last_exc,
+            )
+            time.sleep(_API_RETRY_BACKOFF_SECONDS)
+    raise RuntimeError("AI 服务器当前繁忙，请稍等几秒后重试") from last_exc
+
+
 def _is_incomplete(reading: dict) -> bool:
     return any(
         len(reading.get(field) or "") < min_len for field, min_len in _MIN_FIELD_LENGTH.items()
@@ -166,7 +201,7 @@ def generate_interpretation(
     name: str | None = None,
 ) -> dict:
     for attempt in range(2):
-        reading = _call_claude(chart_summary, dasha_summary, is_minor, name)
+        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name)
         if not _is_incomplete(reading):
             return reading
         logger.warning(
