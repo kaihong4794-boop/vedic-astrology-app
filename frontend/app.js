@@ -71,6 +71,33 @@
     submitBtn.disabled = !(dateOk && timeOk && selectedCity);
   }
 
+  // <input type="date">/<input type="time"> render using the browser/OS's
+  // locale (could be MM/DD/YYYY + 12h, DD/MM/YYYY + 24h, etc. — not
+  // something the page can control), but their underlying .value is always
+  // unambiguous ISO text (YYYY-MM-DD / HH:MM 24h). Echo that back in a fixed,
+  // unambiguous Chinese format so a misread native picker can't silently
+  // swap the day and month (which would throw off the whole chart).
+  function updateDateConfirm() {
+    const el = $("#birth_date");
+    const out = $("#birth_date-confirm");
+    if (!el.value) {
+      out.textContent = "";
+      return;
+    }
+    const [y, m, d] = el.value.split("-").map(Number);
+    out.textContent = `已选择：${y}年${m}月${d}日`;
+  }
+
+  function updateTimeConfirm() {
+    const el = $("#birth_time");
+    const out = $("#birth_time-confirm");
+    if (!el.value) {
+      out.textContent = "";
+      return;
+    }
+    out.textContent = `已选择：${el.value}（24小时制）`;
+  }
+
   searchBtn.addEventListener("click", searchCity);
   cityInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
@@ -84,8 +111,16 @@
     updateSubmitState();
     clearTimeout(searchTimer);
   });
-  $("#birth_date").addEventListener("change", updateSubmitState);
-  $("#birth_time").addEventListener("change", updateSubmitState);
+  $("#birth_date").addEventListener("change", () => {
+    updateDateConfirm();
+    updateSubmitState();
+  });
+  $("#birth_date").addEventListener("input", updateDateConfirm);
+  $("#birth_time").addEventListener("change", () => {
+    updateTimeConfirm();
+    updateSubmitState();
+  });
+  $("#birth_time").addEventListener("input", updateTimeConfirm);
 
   document.addEventListener("click", (e) => {
     if (
