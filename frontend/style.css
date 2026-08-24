@@ -89,6 +89,23 @@ input[type="text"] {
   font-size: 0.95rem;
 }
 
+textarea {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: inherit;
+  resize: vertical;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 input:focus {
   outline: none;
   border-color: var(--accent);

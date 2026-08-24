@@ -83,12 +83,24 @@ def _build_system_prompt(is_minor: bool) -> str:
     return base
 
 
-def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None) -> str:
+def _build_user_prompt(
+    chart_summary: str, dasha_summary: str, name: str | None, focus: str | None = None
+) -> str:
     who = f"命主称呼：{name}\n\n" if name else ""
+    focus_block = ""
+    if focus:
+        focus_block = (
+            f"命主自述近期最关心的现状/问题：{focus}\n\n"
+            "请特别注意：以上是命主自己填写的真实近况，你必须结合命盘依据，让解读——尤其是"
+            "current_period 板块，以及 wealth/relationship/personality 中与此相关的部分——"
+            "直接呼应这个具体现状，给出针对这件事本身的、结合命盘的分析和建议，而不是泛泛而谈、"
+            "答非所问。不要生硬地复述命主填写的内容，而是要让人感觉'这就是在讲我现在这件事'。\n\n"
+        )
     return (
         f"{who}"
         f"本命盘数据：\n{chart_summary}\n\n"
         f"当前大运/小运数据：\n{dasha_summary}\n\n"
+        f"{focus_block}"
         "请生成：一句话金句(tagline)，以及四个板块——性格(personality)、财富(wealth)、"
         "感情或人际(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势"
         "走向与需要关注的重点)。每个板块正文约250-400字，其中包含：至少2个具体命盘依据"
@@ -112,7 +124,13 @@ _MIN_FIELD_LENGTH = {
 }
 
 
-def _call_claude(chart_summary: str, dasha_summary: str, is_minor: bool, name: str | None) -> dict:
+def _call_claude(
+    chart_summary: str,
+    dasha_summary: str,
+    is_minor: bool,
+    name: str | None,
+    focus: str | None = None,
+) -> dict:
     client = _get_client()
     try:
         response = client.messages.create(
@@ -131,7 +149,7 @@ def _call_claude(chart_summary: str, dasha_summary: str, is_minor: bool, name: s
             messages=[
                 {
                     "role": "user",
-                    "content": _build_user_prompt(chart_summary, dasha_summary, name),
+                    "content": _build_user_prompt(chart_summary, dasha_summary, name, focus),
                 }
             ],
         )
@@ -161,7 +179,11 @@ _API_RETRY_BACKOFF_SECONDS = 3
 
 
 def _call_claude_with_retry(
-    chart_summary: str, dasha_summary: str, is_minor: bool, name: str | None
+    chart_summary: str,
+    dasha_summary: str,
+    is_minor: bool,
+    name: str | None,
+    focus: str | None = None,
 ) -> dict:
     """Wrap _call_claude with one short retry for transient API errors, so a
     momentary "servers are busy" blip doesn't get dumped on the user as raw
@@ -171,7 +193,7 @@ def _call_claude_with_retry(
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            return _call_claude(chart_summary, dasha_summary, is_minor, name)
+            return _call_claude(chart_summary, dasha_summary, is_minor, name, focus)
         except anthropic.APIConnectionError as exc:
             last_exc = exc
         except anthropic.APIStatusError as exc:
@@ -199,9 +221,10 @@ def generate_interpretation(
     dasha_summary: str,
     is_minor: bool,
     name: str | None = None,
+    focus: str | None = None,
 ) -> dict:
     for attempt in range(2):
-        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name)
+        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name, focus)
         if not _is_incomplete(reading):
             return reading
         logger.warning(

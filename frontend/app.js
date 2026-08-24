@@ -187,6 +187,7 @@
       lat: selectedCity.lat,
       lon: selectedCity.lon,
       timezone: selectedCity.timezone,
+      focus: $("#focus").value.trim() || null,
     };
 
     try {

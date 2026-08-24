@@ -56,6 +56,7 @@ class ChartRequest(BaseModel):
     lat: float
     lon: float
     timezone: str  # IANA tz name, e.g. "Asia/Shanghai"
+    focus: str | None = Field(default=None, max_length=200)  # 用户填写的近期关注点（选填）
 
 
 def _calc_age(birth: date, today: date) -> float:
@@ -121,9 +122,11 @@ def api_chart(req: ChartRequest):
     chart_summary = astrology.chart_summary_zh(chart)
     dasha_summary = dasha.dasha_summary_zh(birth_dt_utc, chart.moon_longitude, now_utc)
 
+    focus = (req.focus or "").strip() or None
+
     try:
         reading = interpretation.generate_interpretation(
-            chart_summary, dasha_summary, is_minor, req.name
+            chart_summary, dasha_summary, is_minor, req.name, focus
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("interpretation generation failed")
@@ -184,27 +187,19 @@ def api_chart(req: ChartRequest):
     }
 
 
-# auto_error=False so a missing Authorization header reaches our own check
-# below instead of FastAPI's built-in 403 (which omits WWW-Authenticate and
-# so never triggers the browser's native login prompt).
-_admin_security = HTTPBasic(auto_error=False)
+_admin_security = HTTPBasic()
 
 
-def _require_admin(
-    credentials: HTTPBasicCredentials | None = Depends(_admin_security),
-) -> None:
+def _require_admin(credentials: HTTPBasicCredentials = Depends(_admin_security)) -> None:
     expected_password = os.environ.get("ADMIN_PASSWORD")
     if not expected_password:
         raise HTTPException(503, "后台未配置 ADMIN_PASSWORD，已禁用")
-    unauthorized = HTTPException(
-        401, "用户名或密码错误", headers={"WWW-Authenticate": "Basic"}
-    )
-    if credentials is None:
-        raise unauthorized
     correct_username = secrets.compare_digest(credentials.username, "admin")
     correct_password = secrets.compare_digest(credentials.password, expected_password)
     if not (correct_username and correct_password):
-        raise unauthorized
+        raise HTTPException(
+            401, "用户名或密码错误", headers={"WWW-Authenticate": "Basic"}
+        )
 
 
 @app.get("/admin", response_class=HTMLResponse)
