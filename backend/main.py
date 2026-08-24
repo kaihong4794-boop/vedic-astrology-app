@@ -5,6 +5,9 @@ import html
 import logging
 import os
 import secrets
+import threading
+import time
+from collections import defaultdict
 from datetime import date, datetime, timezone as dt_timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -15,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
@@ -82,6 +85,48 @@ def health():
     return {"status": "ok"}
 
 
+# /api/chart makes a real, billed Claude API call every time it's hit, with
+# no login and no per-user identity — without a limit here, a script or bot
+# could hammer this endpoint and run up the API bill with nothing to stop it.
+# This is a simple in-memory per-IP limiter: it resets on process restart and
+# each Render instance would track its own counts, but on the current
+# single-instance deployment that's enough to block casual abuse. If this
+# ever needs to survive restarts or multiple instances, move the counters to
+# the database/Redis instead of this in-process dict.
+_CHART_RATE_LIMIT_MAX = int(os.environ.get("CHART_RATE_LIMIT_PER_HOUR", "8"))
+_CHART_RATE_LIMIT_WINDOW_SECONDS = 3600
+_chart_request_log: dict[str, list[float]] = defaultdict(list)
+_chart_rate_lock = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    # Render sits behind a proxy, so the real client IP arrives via
+    # X-Forwarded-For (first entry in the chain) rather than
+    # request.client.host, which would otherwise just be the proxy's IP.
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_chart_rate_limit(ip: str) -> None:
+    now = time.time()
+    cutoff = now - _CHART_RATE_LIMIT_WINDOW_SECONDS
+    with _chart_rate_lock:
+        recent = [t for t in _chart_request_log.get(ip, []) if t > cutoff]
+        if len(recent) >= _CHART_RATE_LIMIT_MAX:
+            _chart_request_log[ip] = recent
+            raise HTTPException(429, "请求太频繁，请稍后再试（每小时生成次数已达上限）")
+        recent.append(now)
+        _chart_request_log[ip] = recent
+        # Opportunistic cleanup so this dict doesn't grow forever if the
+        # process stays up a long time and sees many distinct IPs.
+        if len(_chart_request_log) > 5000:
+            stale = [k for k, v in _chart_request_log.items() if not v or v[-1] <= cutoff]
+            for k in stale:
+                del _chart_request_log[k]
+
+
 @app.get("/api/geocode", response_model=list[GeocodeResult])
 async def api_geocode(q: str):
     if not q or not q.strip():
@@ -94,7 +139,9 @@ async def api_geocode(q: str):
 
 
 @app.post("/api/chart")
-def api_chart(req: ChartRequest):
+def api_chart(req: ChartRequest, request: Request):
+    _check_chart_rate_limit(_client_ip(request))
+
     try:
         birth_date = date.fromisoformat(req.birth_date)
         hh, mm = (int(x) for x in req.birth_time.split(":")[:2])
