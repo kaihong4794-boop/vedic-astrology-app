@@ -272,4 +272,11 @@ if FRONTEND_DIR.exists():
 
     @app.get("/")
     def index():
-        return FileResponse(str(FRONTEND_DIR / "index.html"))
+        # index.html itself must never be cached by the browser — it's what
+        # references the versioned static assets (?v=N), so a stale cached
+        # copy of THIS file keeps pointing at old markup/JS/CSS forever, no
+        # matter how many times the ?v= query string is bumped.
+        return FileResponse(
+            str(FRONTEND_DIR / "index.html"),
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )
