@@ -28,8 +28,15 @@
   const errorEl = $("#error-box");
   const resultEl = $("#result-section");
 
+  const unlockPanel = $("#unlock-panel");
+  const unlockPriceEl = $("#unlock-price");
+  const unlockBtn = $("#unlock-btn");
+  const payEmailInput = $("#pay-email");
+  const unlockStatusEl = $("#unlock-status");
+
   let selectedCity = null; // {lat, lon, timezone, display_name}
   let searchTimer = null;
+  let currentReadingToken = null;
 
   async function searchCity() {
     const q = cityInput.value.trim();
@@ -209,6 +216,15 @@
   });
 
   function renderResult(data) {
+    currentReadingToken = data.reading_token;
+
+    // Clear any leftover "waiting for payment" UI from a previous render
+    // (e.g. re-generating a chart after coming back from a payment redirect).
+    unlockStatusEl.classList.add("hidden");
+    unlockStatusEl.textContent = "";
+    const oldRetryBtn = document.getElementById("pay-retry-btn");
+    if (oldRetryBtn) oldRetryBtn.remove();
+
     const bannerWrap = $("#minor-banner-wrap");
     bannerWrap.innerHTML = "";
     if (data.is_minor) {
@@ -218,11 +234,11 @@
       bannerWrap.appendChild(div);
     }
 
-    renderTagline(data.interpretation.tagline, data.is_minor);
+    renderTagline(data.interpretation_preview.tagline, data.is_minor);
     renderChartWheel(data);
     renderChartTable(data);
     renderDasha(data.dasha);
-    renderTabs(data.interpretation, data.is_minor);
+    renderTabs(data);
     prepareShareCard(data);
 
     resultEl.classList.remove("hidden");
@@ -337,7 +353,9 @@
     $("#dasha-info").innerHTML = html;
   }
 
-  function renderTabs(interpretation, isMinor) {
+  function renderTabs(data) {
+    const isMinor = data.is_minor;
+    const paid = !!data.paid;
     const tabs = [
       { key: "personality", label: "性格" },
       { key: "wealth", label: "财富" },
@@ -348,8 +366,21 @@
     const contentEl = $("#tab-content");
     tabsEl.innerHTML = "";
 
+    function contentFor(key) {
+      if (paid) {
+        return { text: data.interpretation[key] || "", locked: false };
+      }
+      if (key === "current_period") {
+        const teaser = data.interpretation_preview.current_period_teaser || "";
+        return { text: `${teaser}\n\n🔒 完整内容需要解锁后才能查看`, locked: true };
+      }
+      return { text: "🔒 完整内容需要解锁后才能查看", locked: true };
+    }
+
     function activate(key) {
-      contentEl.textContent = interpretation[key] || "";
+      const { text, locked } = contentFor(key);
+      contentEl.textContent = text;
+      contentEl.classList.toggle("locked", locked);
       [...tabsEl.children].forEach((btn) =>
         btn.classList.toggle("active", btn.dataset.key === key)
       );
@@ -365,6 +396,13 @@
       tabsEl.appendChild(btn);
       if (i === 0) activate(t.key);
     });
+
+    unlockPanel.classList.toggle("hidden", paid);
+    if (!paid) {
+      const price = Number(data.price_rm || 0).toFixed(2);
+      unlockPriceEl.textContent = `解锁完整版解读，一次性 RM ${price}`;
+      unlockBtn.disabled = false;
+    }
   }
 
   function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
@@ -445,7 +483,7 @@
     const taglineY = 320;
     const taglineHeight = wrapCanvasText(
       ctx,
-      `「${data.interpretation.tagline || ""}」`,
+      `「${data.interpretation_preview.tagline || ""}」`,
       marginX,
       taglineY,
       W - marginX * 2,
@@ -493,4 +531,94 @@
     link.href = canvas.toDataURL("image/png");
     link.click();
   });
+
+  // --- Pay-to-unlock ---------------------------------------------------
+
+  async function fetchReading(token) {
+    try {
+      const resp = await fetch(`/api/reading/${encodeURIComponent(token)}`);
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch (err) {
+      return null;
+    }
+  }
+
+  unlockBtn.addEventListener("click", async () => {
+    if (!currentReadingToken) return;
+    unlockBtn.disabled = true;
+    unlockStatusEl.classList.remove("hidden");
+    unlockStatusEl.textContent = "正在跳转到支付页面...";
+    try {
+      const resp = await fetch("/api/pay/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reading_token: currentReadingToken,
+          name: $("#name").value.trim() || null,
+          email: payEmailInput.value.trim() || null,
+        }),
+      });
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result.detail || "创建支付订单失败");
+      if (result.already_paid) {
+        const fresh = await fetchReading(currentReadingToken);
+        if (fresh) renderResult(fresh);
+        return;
+      }
+      if (!result.payment_url) throw new Error("未获取到支付链接");
+      window.location.href = result.payment_url;
+    } catch (err) {
+      unlockStatusEl.textContent = `出错了：${err.message}`;
+      unlockBtn.disabled = false;
+    }
+  });
+
+  // If the page was loaded via the payment page's return URL
+  // (?reading=<token>), load that reading straight away — the browser
+  // redirect can arrive slightly before ToyyibPay's server-to-server
+  // callback confirms payment, so poll briefly before giving up and
+  // offering a manual retry.
+  async function loadFromReturnUrl() {
+    const token = new URLSearchParams(window.location.search).get("reading");
+    if (!token) return;
+
+    loadingEl.classList.remove("hidden");
+    let data = await fetchReading(token);
+    if (!data) {
+      loadingEl.classList.add("hidden");
+      errorEl.textContent = "找不到这份解读，链接可能已失效。";
+      errorEl.classList.remove("hidden");
+      return;
+    }
+
+    let attempts = 0;
+    while (!data.paid && attempts < 5) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      data = (await fetchReading(token)) || data;
+      attempts++;
+    }
+
+    loadingEl.classList.add("hidden");
+    renderResult(data);
+
+    if (!data.paid) {
+      unlockStatusEl.classList.remove("hidden");
+      unlockStatusEl.textContent =
+        "还没查到付款记录。如果你已经完成付款，可能是到账有几秒延迟，可以稍等一下再刷新看看。";
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.id = "pay-retry-btn";
+      retryBtn.className = "primary-btn";
+      retryBtn.style.marginTop = "8px";
+      retryBtn.textContent = "刷新付款状态";
+      retryBtn.addEventListener("click", async () => {
+        const fresh = await fetchReading(token);
+        if (fresh) renderResult(fresh);
+      });
+      unlockStatusEl.insertAdjacentElement("afterend", retryBtn);
+    }
+  }
+
+  loadFromReturnUrl();
 })();

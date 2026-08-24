@@ -1,12 +1,20 @@
-"""Persistence for generated readings, for the /admin review list.
+"""Persistence for generated readings.
 
 Uses Postgres in production (DATABASE_URL set by Render) and falls back to
 a local SQLite file for local development, so recording works everywhere
 without extra setup.
+
+Beyond the original "history log for /admin" role, this now also backs the
+pay-to-unlock flow: each reading gets a random `token` the frontend uses to
+fetch it back (after a redirect from the payment page), and a `paid` flag
+that gates whether the full interpretation is returned or just the free
+preview.
 """
 from __future__ import annotations
 
+import logging
 import os
+import uuid
 from datetime import datetime, timezone as dt_timezone
 
 from sqlalchemy import (
@@ -18,9 +26,13 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
+
+logger = logging.getLogger("vedic_astrology.db")
 
 _DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./local_readings.db")
 # Render's Postgres URLs use the `postgres://` scheme, which SQLAlchemy 2.x
@@ -39,6 +51,13 @@ class Reading(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(dt_timezone.utc))
 
+    # Opaque public identifier used by the frontend to fetch this reading
+    # back (e.g. after returning from the payment page) — never expose the
+    # autoincrement `id` for that, it's guessable/enumerable.
+    token = Column(String(36), unique=True, index=True, nullable=True)
+    paid = Column(Boolean, default=False, nullable=False)
+    bill_code = Column(String(50), nullable=True)  # ToyyibPay BillCode, once created
+
     name = Column(String(50), nullable=True)
     birth_date = Column(String(20))
     birth_time = Column(String(10))
@@ -52,6 +71,12 @@ class Reading(Base):
     ascendant_sign = Column(String(20))
     ascendant_degree = Column(String(20))
 
+    # JSON-encoded snapshot of the free chart/dasha payload (ascendant,
+    # planets, dasha timeline) — stored so GET /api/reading/{token} can
+    # re-serve the exact same result after a payment redirect without
+    # recomputing the chart or re-rendering anything differently.
+    chart_json = Column(Text, nullable=True)
+
     tagline = Column(Text)
     personality = Column(Text)
     wealth = Column(Text)
@@ -59,20 +84,77 @@ class Reading(Base):
     current_period = Column(Text)
 
 
+def _ensure_columns() -> None:
+    """Lightweight, idempotent 'migration'.
+
+    Base.metadata.create_all() only creates TABLES that don't exist yet —
+    it never adds a column to a table that's already there. The production
+    Postgres table predates `token`/`paid`/`bill_code`/`chart_json`, so
+    without this, every insert against the old live table would blow up
+    (or worse, silently drop the new columns) the moment this code deploys.
+    """
+    inspector = inspect(_engine)
+    if "readings" not in inspector.get_table_names():
+        return  # brand-new DB — create_all() already created the full shape
+    existing = {c["name"] for c in inspector.get_columns("readings")}
+    additions = {
+        "token": "VARCHAR(36)",
+        "paid": "BOOLEAN DEFAULT FALSE",
+        "bill_code": "VARCHAR(50)",
+        "chart_json": "TEXT",
+    }
+    with _engine.begin() as conn:
+        for col, ddl_type in additions.items():
+            if col in existing:
+                continue
+            try:
+                conn.execute(text(f"ALTER TABLE readings ADD COLUMN {col} {ddl_type}"))
+                logger.info("added missing column readings.%s", col)
+            except Exception:  # noqa: BLE001
+                logger.exception("failed to add column readings.%s", col)
+
+
 def init_db() -> None:
     Base.metadata.create_all(_engine)
+    _ensure_columns()
 
 
-def record_reading(payload: dict) -> None:
-    """Best-effort insert — recording history must never break a request."""
+def record_reading(payload: dict) -> str | None:
+    """Insert a new reading row and return its public token.
+
+    Unlike the old history-only version of this function, a failure here is
+    no longer just a lost analytics row — without a persisted row there is
+    no token to unlock later, so the caller must treat `None` as a real
+    failure (see api_chart in main.py), not silently carry on.
+    """
+    token = str(uuid.uuid4())
     try:
         with _SessionLocal() as session:
-            session.add(Reading(**payload))
+            session.add(Reading(token=token, paid=False, **payload))
             session.commit()
+        return token
     except Exception:  # noqa: BLE001
-        import logging
+        logger.exception("failed to record reading")
+        return None
 
-        logging.getLogger("vedic_astrology.db").exception("failed to record reading")
+
+def get_reading(token: str) -> Reading | None:
+    with _SessionLocal() as session:
+        stmt = select(Reading).where(Reading.token == token)
+        return session.scalars(stmt).first()
+
+
+def mark_paid(token: str, bill_code: str) -> bool:
+    """Mark a reading as paid. Returns False if the token doesn't exist."""
+    with _SessionLocal() as session:
+        stmt = select(Reading).where(Reading.token == token)
+        row = session.scalars(stmt).first()
+        if row is None:
+            return False
+        row.paid = True
+        row.bill_code = bill_code
+        session.commit()
+        return True
 
 
 def list_readings(limit: int = 200) -> list[Reading]:

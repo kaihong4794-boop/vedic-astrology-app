@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import os
 import secrets
@@ -22,7 +23,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 import astrology
@@ -30,6 +31,7 @@ import dasha
 import db
 import geocode
 import interpretation
+import toyyibpay
 
 app = FastAPI(title="Vedic Astrology Reading")
 db.init_db()
@@ -62,6 +64,18 @@ class ChartRequest(BaseModel):
     focus: str | None = Field(default=None, max_length=200)  # 用户填写的近期关注点（选填）
 
 
+class PayCreateRequest(BaseModel):
+    reading_token: str
+    name: str | None = Field(default=None, max_length=100)
+    email: str | None = Field(default=None, max_length=200)
+
+
+# Price to unlock the full interpretation, in Ringgit. Kept as an env var
+# (not hardcoded) since this is a number we expect to tune after seeing how
+# ToyyibPay's flat per-transaction fee eats into a low price point.
+_UNLOCK_PRICE_RM = float(os.environ.get("UNLOCK_PRICE_RM", "3.00"))
+
+
 def _calc_age(birth: date, today: date) -> float:
     days = (today - birth).days
     return days / 365.2425
@@ -78,6 +92,50 @@ def _point_to_dict(p: astrology.Point) -> dict:
         "nakshatra": p.nakshatra_name,
         "pada": p.nakshatra_pada,
     }
+
+
+def _teaser(text_val: str | None, max_chars: int = 70) -> str:
+    """Free-preview snippet of a section — cut short, not the full text."""
+    text_val = (text_val or "").strip()
+    if len(text_val) <= max_chars:
+        return text_val
+    return text_val[:max_chars].rstrip() + "……"
+
+
+def _reading_response(
+    *,
+    token: str,
+    paid: bool,
+    chart_payload: dict,
+    tagline: str | None,
+    personality: str | None,
+    wealth: str | None,
+    relationship: str | None,
+    current_period: str | None,
+) -> dict:
+    """Shared shape for both POST /api/chart and GET /api/reading/{token} —
+    the interpretation is only included in full once `paid` is true; until
+    then callers only get the tagline and a short current_period teaser.
+    """
+    resp = {
+        **chart_payload,
+        "reading_token": token,
+        "paid": paid,
+        "price_rm": _UNLOCK_PRICE_RM,
+        "interpretation_preview": {
+            "tagline": tagline,
+            "current_period_teaser": _teaser(current_period),
+        },
+    }
+    if paid:
+        resp["interpretation"] = {
+            "tagline": tagline,
+            "personality": personality,
+            "wealth": wealth,
+            "relationship": relationship,
+            "current_period": current_period,
+        }
+    return resp
 
 
 @app.get("/api/health")
@@ -179,25 +237,6 @@ def api_chart(req: ChartRequest, request: Request):
         logger.exception("interpretation generation failed")
         raise HTTPException(502, f"生成解读失败: {exc}") from exc
 
-    db.record_reading({
-        "name": req.name,
-        "birth_date": req.birth_date,
-        "birth_time": req.birth_time,
-        "birth_place": req.birth_place,
-        "timezone": req.timezone,
-        "lat": req.lat,
-        "lon": req.lon,
-        "is_minor": is_minor,
-        "age": age,
-        "ascendant_sign": chart.ascendant.sign_name,
-        "ascendant_degree": astrology.format_degree(chart.ascendant.sign_degree),
-        "tagline": reading.get("tagline"),
-        "personality": reading.get("personality"),
-        "wealth": reading.get("wealth"),
-        "relationship": reading.get("relationship"),
-        "current_period": reading.get("current_period"),
-    })
-
     order = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]
     planets_out = [_point_to_dict(chart.planets[n]) for n in order]
 
@@ -209,7 +248,12 @@ def api_chart(req: ChartRequest, request: Request):
         if p.start >= maha.start
     ][:4]
 
-    return {
+    # Everything that stays free regardless of payment status — the raw
+    # computed chart, not the AI interpretation. Snapshotted to chart_json
+    # so GET /api/reading/{token} can re-serve this exact payload later
+    # (e.g. after the browser comes back from the payment page) without
+    # recomputing anything.
+    chart_payload = {
         "name": req.name,
         "is_minor": is_minor,
         "age": round(age, 1),
@@ -230,8 +274,115 @@ def api_chart(req: ChartRequest, request: Request):
             },
             "upcoming_mahadashas": upcoming,
         },
-        "interpretation": reading,
     }
+
+    token = db.record_reading({
+        "name": req.name,
+        "birth_date": req.birth_date,
+        "birth_time": req.birth_time,
+        "birth_place": req.birth_place,
+        "timezone": req.timezone,
+        "lat": req.lat,
+        "lon": req.lon,
+        "is_minor": is_minor,
+        "age": age,
+        "ascendant_sign": chart.ascendant.sign_name,
+        "ascendant_degree": astrology.format_degree(chart.ascendant.sign_degree),
+        "chart_json": json.dumps(chart_payload),
+        "tagline": reading.get("tagline"),
+        "personality": reading.get("personality"),
+        "wealth": reading.get("wealth"),
+        "relationship": reading.get("relationship"),
+        "current_period": reading.get("current_period"),
+    })
+    if token is None:
+        # Without a saved row there's no token to unlock later, so this
+        # can't be papered over the way a lost history row could be.
+        raise HTTPException(502, "系统暂时繁忙，请稍后重试")
+
+    return _reading_response(
+        token=token,
+        paid=False,
+        chart_payload=chart_payload,
+        tagline=reading.get("tagline"),
+        personality=reading.get("personality"),
+        wealth=reading.get("wealth"),
+        relationship=reading.get("relationship"),
+        current_period=reading.get("current_period"),
+    )
+
+
+@app.get("/api/reading/{token}")
+def api_reading_get(token: str):
+    row = db.get_reading(token)
+    if row is None:
+        raise HTTPException(404, "找不到这份解读，链接可能已失效")
+    chart_payload = json.loads(row.chart_json) if row.chart_json else {}
+    return _reading_response(
+        token=row.token,
+        paid=row.paid,
+        chart_payload=chart_payload,
+        tagline=row.tagline,
+        personality=row.personality,
+        wealth=row.wealth,
+        relationship=row.relationship,
+        current_period=row.current_period,
+    )
+
+
+@app.post("/api/pay/create")
+async def api_pay_create(req: PayCreateRequest, request: Request):
+    row = db.get_reading(req.reading_token)
+    if row is None:
+        raise HTTPException(404, "找不到这份解读，请重新生成")
+    if row.paid:
+        return {"already_paid": True}
+    if not toyyibpay.is_configured():
+        raise HTTPException(503, "支付功能尚未开通，请联系网站管理员")
+
+    amount_cents = int(round(_UNLOCK_PRICE_RM * 100))
+    base = str(request.base_url).rstrip("/")
+    return_url = f"{base}/?reading={req.reading_token}"
+    callback_url = f"{base}/api/pay/callback"
+
+    try:
+        bill_code = await toyyibpay.create_bill(
+            amount_cents=amount_cents,
+            reading_token=req.reading_token,
+            return_url=return_url,
+            callback_url=callback_url,
+            payer_name=req.name or row.name or "客人",
+            payer_email=req.email or "",
+        )
+    except toyyibpay.ToyyibPayError as exc:
+        logger.exception("failed to create ToyyibPay bill")
+        raise HTTPException(502, f"创建支付订单失败: {exc}") from exc
+
+    return {"payment_url": toyyibpay.payment_url(bill_code)}
+
+
+@app.post("/api/pay/callback")
+async def api_pay_callback(request: Request):
+    # ToyyibPay POSTs here server-to-server once a payment completes. We
+    # never trust the POST body's claimed status by itself — anyone can hit
+    # a public URL and claim "status=1" — so we always re-check directly
+    # with ToyyibPay using the billcode before marking anything paid.
+    form = await request.form()
+    bill_code = form.get("billcode") or form.get("billCode")
+    reading_token = form.get("order_id")
+    if not bill_code or not reading_token:
+        logger.warning("ToyyibPay callback missing billcode/order_id: %s", dict(form))
+        return PlainTextResponse("OK")
+
+    try:
+        paid = await toyyibpay.bill_is_paid(str(bill_code))
+    except toyyibpay.ToyyibPayError:
+        logger.exception("failed to verify ToyyibPay bill %s", bill_code)
+        return PlainTextResponse("OK")
+
+    if paid:
+        db.mark_paid(str(reading_token), str(bill_code))
+    return PlainTextResponse("OK")
 
 
 _admin_security = HTTPBasic()

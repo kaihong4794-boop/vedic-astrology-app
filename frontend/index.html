@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>印度占星解读</title>
-<link rel="stylesheet" href="/static/style.css?v=4">
+<link rel="stylesheet" href="/static/style.css?v=5">
 </head>
 <body>
   <div class="app">
@@ -92,6 +92,15 @@
           <h2>解读</h2>
           <div class="tabs" id="tabs"></div>
           <div class="tab-content" id="tab-content"></div>
+          <div id="unlock-panel" class="unlock-panel hidden">
+            <p class="unlock-price" id="unlock-price"></p>
+            <div class="field">
+              <label for="pay-email">邮箱（用于接收付款收据，选填）</label>
+              <input type="text" id="pay-email" placeholder="you@example.com">
+            </div>
+            <button type="button" id="unlock-btn" class="primary-btn">解锁完整版</button>
+            <p class="hint hidden" id="unlock-status"></p>
+          </div>
         </div>
 
         <div class="card">
@@ -110,6 +119,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>
