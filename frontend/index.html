@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>印度占星解读</title>
-<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/style.css?v=3">
 </head>
 <body>
   <div class="app">
@@ -24,12 +24,20 @@
 
           <div class="field-row">
             <div class="field">
-              <label for="birth_date">出生日期</label>
-              <input type="date" id="birth_date" required>
+              <label>出生日期（日 / 月 / 年）</label>
+              <div class="date-select-row">
+                <select id="birth_day" required></select>
+                <select id="birth_month" required></select>
+                <select id="birth_year" required></select>
+              </div>
             </div>
             <div class="field">
-              <label for="birth_time">出生时间</label>
-              <input type="time" id="birth_time" required>
+              <label>出生时间（24小时制）</label>
+              <div class="date-select-row time-select-row">
+                <select id="birth_hour" required></select>
+                <span class="time-colon">:</span>
+                <select id="birth_minute" required></select>
+              </div>
               <p class="hint">出生时间越精确，上升星座与宫位越准确</p>
             </div>
           </div>
@@ -96,6 +104,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=3"></script>
 </body>
 </html>

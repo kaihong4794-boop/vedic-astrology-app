@@ -65,9 +65,81 @@
     updateSubmitState();
   }
 
+  // Native <input type="date">/<input type="time"> render using the
+  // browser/OS's locale (could be MM/DD/YYYY + 12h, DD/MM/YYYY + 24h, etc.
+  // — not something the page can control). To guarantee everyone sees the
+  // same 日/月/年 order and an unambiguous 24-hour time regardless of device
+  // locale, build the picker out of plain <select> elements instead.
+  const DAY_SELECT = $("#birth_day");
+  const MONTH_SELECT = $("#birth_month");
+  const YEAR_SELECT = $("#birth_year");
+  const HOUR_SELECT = $("#birth_hour");
+  const MINUTE_SELECT = $("#birth_minute");
+
+  function fillSelect(el, options, placeholder) {
+    el.innerHTML = "";
+    const ph = document.createElement("option");
+    ph.value = "";
+    ph.textContent = placeholder;
+    el.appendChild(ph);
+    for (const { value, label } of options) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = label;
+      el.appendChild(opt);
+    }
+  }
+
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function initDateTimeSelects() {
+    fillSelect(
+      DAY_SELECT,
+      Array.from({ length: 31 }, (_, i) => ({ value: pad2(i + 1), label: `${i + 1}日` })),
+      "日"
+    );
+    fillSelect(
+      MONTH_SELECT,
+      Array.from({ length: 12 }, (_, i) => ({ value: pad2(i + 1), label: `${i + 1}月` })),
+      "月"
+    );
+    const currentYear = new Date().getFullYear();
+    fillSelect(
+      YEAR_SELECT,
+      Array.from({ length: currentYear - 1899 }, (_, i) => {
+        const y = currentYear - i;
+        return { value: String(y), label: `${y}年` };
+      }),
+      "年"
+    );
+    fillSelect(
+      HOUR_SELECT,
+      Array.from({ length: 24 }, (_, i) => ({ value: pad2(i), label: pad2(i) })),
+      "时"
+    );
+    fillSelect(
+      MINUTE_SELECT,
+      Array.from({ length: 60 }, (_, i) => ({ value: pad2(i), label: pad2(i) })),
+      "分"
+    );
+  }
+  initDateTimeSelects();
+
+  function getBirthDateValue() {
+    const d = DAY_SELECT.value, m = MONTH_SELECT.value, y = YEAR_SELECT.value;
+    return d && m && y ? `${y}-${m}-${d}` : "";
+  }
+
+  function getBirthTimeValue() {
+    const h = HOUR_SELECT.value, min = MINUTE_SELECT.value;
+    return h !== "" && min !== "" ? `${h}:${min}` : "";
+  }
+
   function updateSubmitState() {
-    const dateOk = $("#birth_date").value;
-    const timeOk = $("#birth_time").value;
+    const dateOk = getBirthDateValue();
+    const timeOk = getBirthTimeValue();
     submitBtn.disabled = !(dateOk && timeOk && selectedCity);
   }
 
@@ -84,8 +156,9 @@
     updateSubmitState();
     clearTimeout(searchTimer);
   });
-  $("#birth_date").addEventListener("change", updateSubmitState);
-  $("#birth_time").addEventListener("change", updateSubmitState);
+  for (const el of [DAY_SELECT, MONTH_SELECT, YEAR_SELECT, HOUR_SELECT, MINUTE_SELECT]) {
+    el.addEventListener("change", updateSubmitState);
+  }
 
   document.addEventListener("click", (e) => {
     if (
@@ -108,8 +181,8 @@
 
     const payload = {
       name: $("#name").value.trim() || null,
-      birth_date: $("#birth_date").value,
-      birth_time: $("#birth_time").value,
+      birth_date: getBirthDateValue(),
+      birth_time: getBirthTimeValue(),
       birth_place: selectedCity.display_name,
       lat: selectedCity.lat,
       lon: selectedCity.lon,

@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 
 import anthropic
 
@@ -41,11 +42,30 @@ OUTPUT_SCHEMA = {
 
 def _build_system_prompt(is_minor: bool) -> str:
     base = (
-        "你是一位精通印度吠陀占星学(Jyotish)的资深占星解读师，"
-        "会根据用户提供的本命盘(D1)数据和当前维姆什塔利大运/小运(Vimshottari Dasha)数据，"
-        "生成中文占星解读。解读必须结合命盘中具体的行星、星座、宫位与星宿信息展开分析，"
-        "避免使用套话或含糊其辞的通用描述。语言温和、有洞察力，呈现命盘的倾向与可能性，"
-        "而不是绝对化的宿命论断言；不提供具体的医疗、法律或投资建议。"
+        "你是一位精通印度吠陀占星学(Jyotish)的资深占星解读师，正在为用户提供的这一张具体命盘"
+        "（本命盘 D1 数据 + 当前维姆什塔利大运/小运 Vimshottari Dasha 数据）撰写中文解读。"
+        "\n\n写作铁律，三条都必须严格遵守：\n"
+        "1. 具体化，杜绝巴纳姆效应——每个板块必须明确点出至少2个具体的命盘依据"
+        "（某行星+星座+宫位，或某行星+星宿），并说清楚这个依据具体是怎么导向你给出的结论的。"
+        "绝不能写换成任何人的命盘都成立的空泛描述，比如'你外表冷静内心敏感''你渴望被理解和认可'"
+        "'你是个复杂矛盾的人'这类不结合命盘细节、放之四海而皆准的套话——这类话读者只会觉得"
+        "'说的好像是我又好像谁都是'，必须避免。\n"
+        "2. 说人话，别故弄玄虚——用日常、具体、口语化的中文表达，多用'比如'引出具体的生活场景"
+        "（工作汇报、和伴侣吵架时、发工资那天、跟朋友借钱等），少用抽象的宇宙隐喻、哲学化措辞，"
+        "以及'能量''频率''课题''疗愈''觉醒'这类玄学黑话堆砌。宁可写得直白甚至略显朴素，"
+        "也不要写得像格言警句或心灵鸡汤，一个没学过占星的人也要能一读就懂。\n"
+        "3. 一定要给可执行建议——每个板块结尾必须给1-2条具体、可操作的建议，写清楚'做什么'，"
+        "而不是'要多沟通''要注意平衡'这种空话；建议要能落实成具体动作"
+        "（比如具体的沟通方式、具体的记账/理财动作、具体可以调整的习惯或可以留意的信号），"
+        "并且要和该板块前面引用的命盘依据挂钩，让人一看就懂'为什么建议是这个'。\n"
+        "4. 别写成体检报告或问题诊断书——每个板块不能通篇都是'哪里有问题、要注意什么风险、"
+        "要怎么纠正'，必须结合命盘里真实存在的强项、有利配置或即将到来的机会点，"
+        "明确写出至少一处'这是你的优势，可以主动去用/去争取'或'接下来这段时间有什么具体"
+        "值得期待、可以主动把握的事'，要让读的人读完除了知道要注意什么，也对自己和接下来"
+        "有真实依据的盼头，而不是只剩下一堆要改的毛病。current_period 板块尤其要写清楚"
+        "近期命盘里有支撑的、具体可以期待或主动争取的机会，不能只谈风险和辛苦。\n\n"
+        "语言温和、有洞察力，呈现命盘的倾向与可能性，而不是绝对化的宿命论断言；"
+        "不提供具体的医疗、法律或投资建议。"
     )
     if is_minor:
         base += (
@@ -55,6 +75,8 @@ def _build_system_prompt(is_minor: bool) -> str:
             "孩子的人际相处与情感表达方式(不涉及婚恋、不做感情关系分析)、"
             "以及当前所处成长阶段可能出现的状态与家长可以关注的重点。"
             "'relationship'板块请围绕孩子的人际交往与情绪特点撰写，而非爱情关系。"
+            "给家长的建议同样要具体可执行（比如可以怎么跟孩子聊、可以给孩子安排什么样的小任务或"
+            "环境，而不是'多陪伴孩子'这种空话）。"
         )
     else:
         base += "\n\n解读对象是本命盘的主人本人，请使用第二人称'你'来称呼命主。"
@@ -69,7 +91,12 @@ def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None)
         f"当前大运/小运数据：\n{dasha_summary}\n\n"
         "请生成：一句话金句(tagline)，以及四个板块——性格(personality)、财富(wealth)、"
         "感情或人际(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势"
-        "走向与需要关注的重点)。每个板块正文约200-350字。"
+        "走向与需要关注的重点)。每个板块正文约250-400字，其中包含：至少2个具体命盘依据"
+        "（点名某行星+星座+宫位，或某行星+星宿）、依据如何导向结论的说明、至少一处基于命盘"
+        "依据的真实优势或值得期待的机会点、以及结尾1-2条与依据挂钩的具体可执行建议——不能"
+        "写成清一色的问题诊断和风险提示。current_period 板块的建议要结合当前大运/小运的星体"
+        "特质来给，并且要明确指出近期具体可以主动把握的机会，不只是要规避的风险。全程用日常"
+        "口语化的中文，不要写成格言或空泛的哲学感悟。"
     )
 
 
@@ -78,10 +105,10 @@ def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None)
 # four long-form sections, which always run several hundred characters.
 _MIN_FIELD_LENGTH = {
     "tagline": 5,
-    "personality": 80,
-    "wealth": 80,
-    "relationship": 80,
-    "current_period": 80,
+    "personality": 150,
+    "wealth": 150,
+    "relationship": 150,
+    "current_period": 150,
 }
 
 
@@ -127,6 +154,40 @@ def _call_claude(chart_summary: str, dasha_summary: str, is_minor: bool, name: s
         raise RuntimeError(f"AI 返回的内容不是合法 JSON: {exc}") from exc
 
 
+# Transient Claude API failures worth a quick automatic retry: rate limits
+# and momentary server-side overload/5xx (529 is Anthropic's "overloaded_error").
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 529}
+_API_RETRY_BACKOFF_SECONDS = 3
+
+
+def _call_claude_with_retry(
+    chart_summary: str, dasha_summary: str, is_minor: bool, name: str | None
+) -> dict:
+    """Wrap _call_claude with one short retry for transient API errors, so a
+    momentary "servers are busy" blip doesn't get dumped on the user as raw
+    API error JSON — they see a plain-language message only if it's still
+    failing after the retry.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            return _call_claude(chart_summary, dasha_summary, is_minor, name)
+        except anthropic.APIConnectionError as exc:
+            last_exc = exc
+        except anthropic.APIStatusError as exc:
+            if exc.status_code not in _RETRYABLE_STATUS_CODES:
+                raise RuntimeError("生成解读失败，请稍后重试") from exc
+            last_exc = exc
+        if attempt == 0:
+            logger.warning(
+                "Claude API call hit a transient error, retrying in %ds: %s",
+                _API_RETRY_BACKOFF_SECONDS,
+                last_exc,
+            )
+            time.sleep(_API_RETRY_BACKOFF_SECONDS)
+    raise RuntimeError("AI 服务器当前繁忙，请稍等几秒后重试") from last_exc
+
+
 def _is_incomplete(reading: dict) -> bool:
     return any(
         len(reading.get(field) or "") < min_len for field, min_len in _MIN_FIELD_LENGTH.items()
@@ -140,7 +201,7 @@ def generate_interpretation(
     name: str | None = None,
 ) -> dict:
     for attempt in range(2):
-        reading = _call_claude(chart_summary, dasha_summary, is_minor, name)
+        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name)
         if not _is_incomplete(reading):
             return reading
         logger.warning(

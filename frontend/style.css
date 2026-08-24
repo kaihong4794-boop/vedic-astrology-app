@@ -79,7 +79,7 @@ label {
   color: var(--text-dim);
 }
 
-input[type="text"], input[type="date"], input[type="time"] {
+input[type="text"] {
   width: 100%;
   padding: 10px 12px;
   background: var(--bg-card-2);
@@ -92,6 +92,37 @@ input[type="text"], input[type="date"], input[type="time"] {
 input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.date-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.date-select-row select {
+  flex: 1;
+  min-width: 64px;
+  padding: 10px 8px;
+  background: var(--bg-card-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.date-select-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.time-select-row {
+  max-width: 200px;
+}
+
+.time-select-row .time-colon {
+  color: var(--text-dim);
+  font-weight: 600;
 }
 
 .hint {
