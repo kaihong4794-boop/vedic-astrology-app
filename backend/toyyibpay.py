@@ -84,7 +84,12 @@ async def create_bill(
         "billExternalReferenceNo": reading_token,
         "billTo": _ascii_safe(payer_name, "Customer")[:100],
         "billEmail": payer_email or "guest@example.com",
-        "billPhone": "",
+        # ToyyibPay's API rejects an empty billPhone outright ("billPhone
+        # parameter is empty") once billPayorInfo=1, even though the app
+        # doesn't currently collect a phone number from the user — a
+        # placeholder satisfies the API without adding a form field for a
+        # RM3 purchase.
+        "billPhone": "0100000000",
         "billSplitPayment": 0,
         "billPaymentChannel": "0",  # 0 = FPX + credit card
         "billContentEmail": "Thank you for your purchase. Your full reading is now unlocked.",
