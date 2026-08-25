@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import astrology
 import dasha
@@ -54,14 +54,21 @@ class GeocodeResult(BaseModel):
 
 
 class ChartRequest(BaseModel):
-    name: str | None = Field(default=None, max_length=50)
+    name: str = Field(..., min_length=1, max_length=50)
     birth_date: str  # "YYYY-MM-DD"
     birth_time: str  # "HH:MM"
     birth_place: str | None = Field(default=None, max_length=200)
     lat: float
     lon: float
     timezone: str  # IANA tz name, e.g. "Asia/Shanghai"
-    focus: str | None = Field(default=None, max_length=200)  # 用户填写的近期关注点（选填）
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("姓名不能为空")
+        return v
 
 
 class PayCreateRequest(BaseModel):
@@ -109,13 +116,15 @@ def _reading_response(
     chart_payload: dict,
     tagline: str | None,
     personality: str | None,
+    career: str | None,
     wealth: str | None,
     relationship: str | None,
     current_period: str | None,
 ) -> dict:
     """Shared shape for both POST /api/chart and GET /api/reading/{token} —
     the interpretation is only included in full once `paid` is true; until
-    then callers only get the tagline and a short current_period teaser.
+    then callers only get the tagline (always free) plus a short teaser of
+    every other section, so there's something real to judge before paying.
     """
     resp = {
         **chart_payload,
@@ -124,6 +133,10 @@ def _reading_response(
         "price_rm": _UNLOCK_PRICE_RM,
         "interpretation_preview": {
             "tagline": tagline,
+            "personality_teaser": _teaser(personality),
+            "career_teaser": _teaser(career),
+            "wealth_teaser": _teaser(wealth),
+            "relationship_teaser": _teaser(relationship),
             "current_period_teaser": _teaser(current_period),
         },
     }
@@ -131,6 +144,7 @@ def _reading_response(
         resp["interpretation"] = {
             "tagline": tagline,
             "personality": personality,
+            "career": career,
             "wealth": wealth,
             "relationship": relationship,
             "current_period": current_period,
@@ -227,11 +241,9 @@ def api_chart(req: ChartRequest, request: Request):
     chart_summary = astrology.chart_summary_zh(chart)
     dasha_summary = dasha.dasha_summary_zh(birth_dt_utc, chart.moon_longitude, now_utc)
 
-    focus = (req.focus or "").strip() or None
-
     try:
         reading = interpretation.generate_interpretation(
-            chart_summary, dasha_summary, is_minor, req.name, focus
+            chart_summary, dasha_summary, is_minor, req.name
         )
     except Exception as exc:  # noqa: BLE001
         logger.exception("interpretation generation failed")
@@ -291,6 +303,7 @@ def api_chart(req: ChartRequest, request: Request):
         "chart_json": json.dumps(chart_payload),
         "tagline": reading.get("tagline"),
         "personality": reading.get("personality"),
+        "career": reading.get("career"),
         "wealth": reading.get("wealth"),
         "relationship": reading.get("relationship"),
         "current_period": reading.get("current_period"),
@@ -306,6 +319,7 @@ def api_chart(req: ChartRequest, request: Request):
         chart_payload=chart_payload,
         tagline=reading.get("tagline"),
         personality=reading.get("personality"),
+        career=reading.get("career"),
         wealth=reading.get("wealth"),
         relationship=reading.get("relationship"),
         current_period=reading.get("current_period"),
@@ -324,6 +338,7 @@ def api_reading_get(token: str):
         chart_payload=chart_payload,
         tagline=row.tagline,
         personality=row.personality,
+        career=row.career,
         wealth=row.wealth,
         relationship=row.relationship,
         current_period=row.current_period,
@@ -422,6 +437,7 @@ def admin_list(_: None = Depends(_require_admin)):
             <details>
               <summary>查看</summary>
               <p><b>性格</b><br>{html.escape(r.personality or "")}</p>
+              <p><b>事业</b><br>{html.escape(r.career or "")}</p>
               <p><b>财富</b><br>{html.escape(r.wealth or "")}</p>
               <p><b>感情/人际</b><br>{html.escape(r.relationship or "")}</p>
               <p><b>近况</b><br>{html.escape(r.current_period or "")}</p>

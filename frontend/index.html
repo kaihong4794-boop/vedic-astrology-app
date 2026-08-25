@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>印度占星解读</title>
-<link rel="stylesheet" href="/static/style.css?v=5">
+<link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 <body>
   <div class="app">
@@ -18,8 +18,8 @@
         <h2>出生信息</h2>
         <form id="birth-form">
           <div class="field">
-            <label for="name">姓名 / 称呼（可选）</label>
-            <input type="text" id="name" placeholder="用于解读中称呼命主">
+            <label for="name">姓名 / 称呼</label>
+            <input type="text" id="name" placeholder="用于解读中称呼命主" required>
           </div>
 
           <div class="field-row">
@@ -50,12 +50,6 @@
             </div>
             <ul id="city-results" class="city-results hidden"></ul>
             <p class="hint" id="city-selected"></p>
-          </div>
-
-          <div class="field">
-            <label for="focus">最近想重点了解什么？（选填）</label>
-            <textarea id="focus" maxlength="200" rows="2" placeholder="比如：最近工作压力大，想知道要不要换工作 / 感情上正在纠结要不要复合 / 最近手头紧，想知道财务上要注意什么"></textarea>
-            <p class="hint">填了这个，解读会尽量结合你说的这件事来分析，而不是泛泛而谈</p>
           </div>
 
           <button type="submit" id="submit-btn" class="primary-btn" disabled>生成命盘与解读</button>
@@ -119,6 +113,6 @@
     </footer>
   </div>
 
-  <script src="/static/app.js?v=5"></script>
+  <script src="/static/app.js?v=6"></script>
 </body>
 </html>

@@ -18,6 +18,7 @@
   ];
 
   const form = $("#birth-form");
+  const nameInput = $("#name");
   const cityInput = $("#city");
   const searchBtn = $("#search-btn");
   const cityResults = $("#city-results");
@@ -37,6 +38,17 @@
   let selectedCity = null; // {lat, lon, timezone, display_name}
   let searchTimer = null;
   let currentReadingToken = null;
+
+  // FastAPI's own validation errors (422) put `detail` as an array of
+  // {msg, ...} objects rather than the plain string our own HTTPException
+  // calls use — handle both so the user never sees "[object Object]".
+  function errorMessage(data) {
+    const detail = data && data.detail;
+    if (Array.isArray(detail)) {
+      return detail.map((d) => d.msg || JSON.stringify(d)).join("; ") || "请求有误";
+    }
+    return detail || "计算失败";
+  }
 
   async function searchCity() {
     const q = cityInput.value.trim();
@@ -145,10 +157,13 @@
   }
 
   function updateSubmitState() {
+    const nameOk = nameInput.value.trim();
     const dateOk = getBirthDateValue();
     const timeOk = getBirthTimeValue();
-    submitBtn.disabled = !(dateOk && timeOk && selectedCity);
+    submitBtn.disabled = !(nameOk && dateOk && timeOk && selectedCity);
   }
+
+  nameInput.addEventListener("input", updateSubmitState);
 
   searchBtn.addEventListener("click", searchCity);
   cityInput.addEventListener("keydown", (e) => {
@@ -187,14 +202,13 @@
     submitBtn.disabled = true;
 
     const payload = {
-      name: $("#name").value.trim() || null,
+      name: nameInput.value.trim(),
       birth_date: getBirthDateValue(),
       birth_time: getBirthTimeValue(),
       birth_place: selectedCity.display_name,
       lat: selectedCity.lat,
       lon: selectedCity.lon,
       timezone: selectedCity.timezone,
-      focus: $("#focus").value.trim() || null,
     };
 
     try {
@@ -204,7 +218,7 @@
         body: JSON.stringify(payload),
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "计算失败");
+      if (!resp.ok) throw new Error(errorMessage(data));
       renderResult(data);
     } catch (err) {
       errorEl.textContent = `出错了：${err.message}`;
@@ -358,6 +372,7 @@
     const paid = !!data.paid;
     const tabs = [
       { key: "personality", label: "性格" },
+      { key: "career", label: "事业" },
       { key: "wealth", label: "财富" },
       { key: "relationship", label: isMinor ? "人际" : "感情" },
       { key: "current_period", label: "近况" },
@@ -370,11 +385,8 @@
       if (paid) {
         return { text: data.interpretation[key] || "", locked: false };
       }
-      if (key === "current_period") {
-        const teaser = data.interpretation_preview.current_period_teaser || "";
-        return { text: `${teaser}\n\n🔒 完整内容需要解锁后才能查看`, locked: true };
-      }
-      return { text: "🔒 完整内容需要解锁后才能查看", locked: true };
+      const teaser = data.interpretation_preview[`${key}_teaser`] || "";
+      return { text: `${teaser}\n\n🔒 完整内容需要解锁后才能查看`, locked: true };
     }
 
     function activate(key) {
@@ -560,7 +572,7 @@
         }),
       });
       const result = await resp.json();
-      if (!resp.ok) throw new Error(result.detail || "创建支付订单失败");
+      if (!resp.ok) throw new Error(errorMessage(result) || "创建支付订单失败");
       if (result.already_paid) {
         const fresh = await fetchReading(currentReadingToken);
         if (fresh) renderResult(fresh);

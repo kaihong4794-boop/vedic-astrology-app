@@ -79,6 +79,7 @@ class Reading(Base):
 
     tagline = Column(Text)
     personality = Column(Text)
+    career = Column(Text)
     wealth = Column(Text)
     relationship = Column(Text)
     current_period = Column(Text)
@@ -102,6 +103,7 @@ def _ensure_columns() -> None:
         "paid": "BOOLEAN DEFAULT FALSE",
         "bill_code": "VARCHAR(50)",
         "chart_json": "TEXT",
+        "career": "TEXT",
     }
     with _engine.begin() as conn:
         for col, ddl_type in additions.items():

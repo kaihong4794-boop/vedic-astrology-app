@@ -1,4 +1,4 @@
-"""Claude-generated Vedic astrology interpretation, split into four sections."""
+"""Claude-generated Vedic astrology interpretation, split into five sections."""
 from __future__ import annotations
 
 import json
@@ -31,11 +31,12 @@ OUTPUT_SCHEMA = {
             "提炼命盘中最具辨识度的一点特质或当前运势的一个亮点，语气生动、不落俗套",
         },
         "personality": {"type": "string", "description": "性格板块解读"},
+        "career": {"type": "string", "description": "事业板块解读"},
         "wealth": {"type": "string", "description": "财富板块解读"},
         "relationship": {"type": "string", "description": "感情/人际板块解读"},
         "current_period": {"type": "string", "description": "近况/当前大运小运板块解读"},
     },
-    "required": ["tagline", "personality", "wealth", "relationship", "current_period"],
+    "required": ["tagline", "personality", "career", "wealth", "relationship", "current_period"],
     "additionalProperties": False,
 }
 
@@ -44,7 +45,7 @@ def _build_system_prompt(is_minor: bool) -> str:
     base = (
         "你是一位精通印度吠陀占星学(Jyotish)的资深占星解读师，正在为用户提供的这一张具体命盘"
         "（本命盘 D1 数据 + 当前维姆什塔利大运/小运 Vimshottari Dasha 数据）撰写中文解读。"
-        "\n\n写作铁律，三条都必须严格遵守：\n"
+        "\n\n写作铁律，必须严格遵守：\n"
         "1. 具体化，杜绝巴纳姆效应——每个板块必须明确点出至少2个具体的命盘依据"
         "（某行星+星座+宫位，或某行星+星宿），并说清楚这个依据具体是怎么导向你给出的结论的。"
         "绝不能写换成任何人的命盘都成立的空泛描述，比如'你外表冷静内心敏感''你渴望被理解和认可'"
@@ -57,7 +58,11 @@ def _build_system_prompt(is_minor: bool) -> str:
         "3. 一定要给可执行建议——每个板块结尾必须给1-2条具体、可操作的建议，写清楚'做什么'，"
         "而不是'要多沟通''要注意平衡'这种空话；建议要能落实成具体动作"
         "（比如具体的沟通方式、具体的记账/理财动作、具体可以调整的习惯或可以留意的信号），"
-        "并且要和该板块前面引用的命盘依据挂钩，让人一看就懂'为什么建议是这个'。\n"
+        "并且要和该板块前面引用的命盘依据挂钩，让人一看就懂'为什么建议是这个'。在与财富、事业、"
+        "近况相关、且命盘中能看出明显行星弱势或不利配置的地方，可以在可执行建议之外，额外补充"
+        "一条传统吠陀占星的调整参考（比如适合的颜色、宝石、适合行动的星期几，或者一个简单的"
+        "居家/随身调整），但必须清楚标注这是'传统习俗参考'，语气上是温和的可选建议，绝不能写成"
+        "'不做就会怎样'这种制造焦虑、逼人行动的口吻，也不能暗示这能替代医疗、法律或财务专业建议。\n"
         "4. 别写成体检报告或问题诊断书——每个板块不能通篇都是'哪里有问题、要注意什么风险、"
         "要怎么纠正'，必须结合命盘里真实存在的强项、有利配置或即将到来的机会点，"
         "明确写出至少一处'这是你的优势，可以主动去用/去争取'或'接下来这段时间有什么具体"
@@ -75,6 +80,8 @@ def _build_system_prompt(is_minor: bool) -> str:
             "孩子的人际相处与情感表达方式(不涉及婚恋、不做感情关系分析)、"
             "以及当前所处成长阶段可能出现的状态与家长可以关注的重点。"
             "'relationship'板块请围绕孩子的人际交往与情绪特点撰写，而非爱情关系。"
+            "'career'板块请围绕孩子的学业方向、学习特长、以及未来可能适合发展的领域来写，"
+            "不谈'事业''跳槽''创业'这类成人语境的内容。"
             "给家长的建议同样要具体可执行（比如可以怎么跟孩子聊、可以给孩子安排什么样的小任务或"
             "环境，而不是'多陪伴孩子'这种空话）。"
         )
@@ -83,56 +90,32 @@ def _build_system_prompt(is_minor: bool) -> str:
     return base
 
 
-def _build_user_prompt(
-    chart_summary: str, dasha_summary: str, name: str | None, focus: str | None = None
-) -> str:
+def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None) -> str:
     who = f"命主称呼：{name}\n\n" if name else ""
-    focus_block = ""
-    if focus:
-        focus_block = (
-            f"命主自己填写的近期关注点/具体问题：{focus}\n\n"
-            "这段话可能包含一个问题，也可能是好几个不同的问题堆在一起（比如同时问了天赋、"
-            "感情、婚姻）。这是全篇最重要的信息，处理方式必须严格遵守：\n"
-            "1. 逐条识别命主问的每一个具体问题，分别判断它天然属于 personality/wealth/"
-            "relationship/current_period 中的哪一个板块（比如问天赋、擅长什么→personality；"
-            "问新伴侣、婚姻、离婚、感情走向→relationship；问收入、破财、投资→wealth）。\n"
-            "2. 只要某个板块对应到命主问的问题，那个板块就必须把回答这个具体问题当成主线来写，"
-            "不能仍然套用该板块平时泛泛而谈的写法、答非所问。比如命主问'我的天赋是什么'，"
-            "personality 板块就要直接点出命盘里跟天赋/才能相关的具体行星配置，明确回答'你的"
-            "天赋方向是什么'；命主问'会不会有新伴侣'或'这一生有没有离婚的命'，relationship "
-            "板块就要围绕这两个具体问题、结合命盘里跟感情/婚姻宫位相关的具体配置，给出有命盘"
-            "依据的倾向性判断——可以是'这段时间的配置偏向……'或'命盘目前看到的倾向是……'，"
-            "但必须针对问题本身给出一个明确、具体、有方向感的回应，绝不能因为怕说得太绝对就"
-            "整段回避问题、只谈些无关的空泛内容。\n"
-            "3. 命主完全没问到的板块（比如这次没问financial相关的问题），才维持该板块平时的"
-            "常规写法，正常结合命盘讲性格/财富/感情/近况即可，不用强行牵扯命主的问题。\n"
-            "4. current_period 板块除了照常结合当前大运/小运，也要尽量呼应命主问的问题，"
-            "特别是问题跟'最近'或'现在'有关的部分。\n"
-            "不要生硬地复述命主填写的原话，而是要让命主读完感觉'这就是在正面回答我问的那几个"
-            "问题'，而不是收到几段和自己问题没什么关系的套话。\n\n"
-        )
     return (
         f"{who}"
         f"本命盘数据：\n{chart_summary}\n\n"
         f"当前大运/小运数据：\n{dasha_summary}\n\n"
-        f"{focus_block}"
-        "请生成：一句话金句(tagline)，以及四个板块——性格(personality)、财富(wealth)、"
-        "感情或人际(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势"
-        "走向与需要关注的重点)。每个板块正文约250-400字，其中包含：至少2个具体命盘依据"
-        "（点名某行星+星座+宫位，或某行星+星宿）、依据如何导向结论的说明、至少一处基于命盘"
-        "依据的真实优势或值得期待的机会点、以及结尾1-2条与依据挂钩的具体可执行建议——不能"
-        "写成清一色的问题诊断和风险提示。current_period 板块的建议要结合当前大运/小运的星体"
-        "特质来给，并且要明确指出近期具体可以主动把握的机会，不只是要规避的风险。全程用日常"
-        "口语化的中文，不要写成格言或空泛的哲学感悟。"
+        "请生成：一句话金句(tagline)，以及五个板块——性格(personality)、事业(career，需结合"
+        "第10宫及相关行星配置说明适合的发展方向、天赋优势，以及近期是否有适合主动争取、调整或"
+        "留意的信号；命主是未成年人时改为学业方向与学习特长)、财富(wealth)、感情或人际"
+        "(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势走向与需要"
+        "关注的重点)。每个板块正文约250-400字，其中包含：至少2个具体命盘依据（点名某行星+"
+        "星座+宫位，或某行星+星宿）、依据如何导向结论的说明、至少一处基于命盘依据的真实优势或"
+        "值得期待的机会点、以及结尾1-2条与依据挂钩的具体可执行建议——不能写成清一色的问题诊断"
+        "和风险提示。current_period 板块的建议要结合当前大运/小运的星体特质来给，并且要明确"
+        "指出近期具体可以主动把握的机会，不只是要规避的风险。全程用日常口语化的中文，不要写成"
+        "格言或空泛的哲学感悟。"
     )
 
 
 # Minimum acceptable length per field (chars). tagline is intentionally short
 # (<=28 Chinese characters by design) so it needs a much lower bar than the
-# four long-form sections, which always run several hundred characters.
+# five long-form sections, which always run several hundred characters.
 _MIN_FIELD_LENGTH = {
     "tagline": 5,
     "personality": 150,
+    "career": 150,
     "wealth": 150,
     "relationship": 150,
     "current_period": 150,
@@ -144,7 +127,6 @@ def _call_claude(
     dasha_summary: str,
     is_minor: bool,
     name: str | None,
-    focus: str | None = None,
 ) -> dict:
     client = _get_client()
     try:
@@ -164,7 +146,7 @@ def _call_claude(
             messages=[
                 {
                     "role": "user",
-                    "content": _build_user_prompt(chart_summary, dasha_summary, name, focus),
+                    "content": _build_user_prompt(chart_summary, dasha_summary, name),
                 }
             ],
         )
@@ -198,7 +180,6 @@ def _call_claude_with_retry(
     dasha_summary: str,
     is_minor: bool,
     name: str | None,
-    focus: str | None = None,
 ) -> dict:
     """Wrap _call_claude with one short retry for transient API errors, so a
     momentary "servers are busy" blip doesn't get dumped on the user as raw
@@ -208,7 +189,7 @@ def _call_claude_with_retry(
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            return _call_claude(chart_summary, dasha_summary, is_minor, name, focus)
+            return _call_claude(chart_summary, dasha_summary, is_minor, name)
         except anthropic.APIConnectionError as exc:
             last_exc = exc
         except anthropic.APIStatusError as exc:
@@ -236,10 +217,9 @@ def generate_interpretation(
     dasha_summary: str,
     is_minor: bool,
     name: str | None = None,
-    focus: str | None = None,
 ) -> dict:
     for attempt in range(2):
-        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name, focus)
+        reading = _call_claude_with_retry(chart_summary, dasha_summary, is_minor, name)
         if not _is_incomplete(reading):
             return reading
         logger.warning(
