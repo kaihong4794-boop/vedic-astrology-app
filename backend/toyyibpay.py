@@ -17,6 +17,7 @@ sandbox before switching to the live https://toyyibpay.com.
 from __future__ import annotations
 
 import os
+import re
 
 import httpx
 
@@ -44,6 +45,18 @@ def payment_url(bill_code: str) -> str:
     return f"{_BASE_URL}/{bill_code}"
 
 
+def _ascii_safe(text: str | None, fallback: str) -> str:
+    """FPX (the underlying Malaysian bank rail) only documents a fixed set
+    of ASCII characters as supported in bill fields — no mention of Unicode
+    support for Chinese or other non-ASCII text. Rather than risk a bill
+    getting rejected or the payer's name showing up garbled on the bank's
+    own payment page, strip down to ASCII and fall back to a safe default
+    if nothing usable survives (e.g. a name typed entirely in Chinese).
+    """
+    ascii_only = re.sub(r"[^\x20-\x7E]", "", text or "").strip()
+    return ascii_only or fallback
+
+
 async def create_bill(
     *,
     amount_cents: int,
@@ -58,20 +71,23 @@ async def create_bill(
     payload = {
         "userSecretKey": _SECRET_KEY,
         "categoryCode": _CATEGORY_CODE,
-        "billName": "印度占星解读",
-        "billDescription": "解锁完整命盘解读",
+        # Kept in English — see _ascii_safe's docstring: FPX's documented
+        # character set doesn't cover Chinese, and this bill copy is fixed
+        # text (not user data), so there's no reason to risk it.
+        "billName": "Vedic Astrology Reading",
+        "billDescription": "Unlock full Vedic astrology chart interpretation",
         "billPriceSetting": 1,  # 1 = fixed price (set by us, not the payer)
         "billPayorInfo": 1,
         "billAmount": str(amount_cents),
         "billReturnUrl": return_url,
         "billCallbackUrl": callback_url,
         "billExternalReferenceNo": reading_token,
-        "billTo": (payer_name or "客人")[:100],
+        "billTo": _ascii_safe(payer_name, "Customer")[:100],
         "billEmail": payer_email or "guest@example.com",
         "billPhone": "",
         "billSplitPayment": 0,
         "billPaymentChannel": "0",  # 0 = FPX + credit card
-        "billContentEmail": "感谢你的支持，付款完成即可查看完整解读。",
+        "billContentEmail": "Thank you for your purchase. Your full reading is now unlocked.",
         "billChargeToCustomer": 1,
     }
     try:
