@@ -382,17 +382,47 @@
     tabsEl.innerHTML = "";
 
     function contentFor(key) {
+      // The chart-based analysis ("insight") is always shown in full for
+      // free — only the concrete actionable "advice" is gated behind
+      // payment, per the insight/advice split. Kept as two separate pieces
+      // (rather than one string) so only the advice half gets the dimmed
+      // "locked" styling — the free insight should read as complete, not
+      // as a teaser.
+      const insight = data.interpretation_preview[`${key}_insight`] || "";
       if (paid) {
-        return { text: data.interpretation[key] || "", locked: false };
+        const advice =
+          (data.interpretation_advice && data.interpretation_advice[`${key}_advice`]) || "";
+        return { insight, adviceLabel: "💡 具体建议", advice, locked: false };
       }
-      const teaser = data.interpretation_preview[`${key}_teaser`] || "";
-      return { text: `${teaser}\n\n🔒 完整内容需要解锁后才能查看`, locked: true };
+      return {
+        insight,
+        adviceLabel: "🔒 具体可执行建议（含传统调整参考）",
+        advice: "解锁完整版后查看",
+        locked: true,
+      };
     }
 
     function activate(key) {
-      const { text, locked } = contentFor(key);
-      contentEl.textContent = text;
-      contentEl.classList.toggle("locked", locked);
+      const { insight, adviceLabel, advice, locked } = contentFor(key);
+      contentEl.innerHTML = "";
+
+      const insightEl = document.createElement("div");
+      insightEl.className = "tab-insight";
+      insightEl.textContent = insight;
+      contentEl.appendChild(insightEl);
+
+      const adviceWrap = document.createElement("div");
+      adviceWrap.className = "tab-advice" + (locked ? " locked" : "");
+      const labelEl = document.createElement("div");
+      labelEl.className = "tab-advice-label";
+      labelEl.textContent = adviceLabel;
+      const bodyEl = document.createElement("div");
+      bodyEl.className = "tab-advice-body";
+      bodyEl.textContent = advice;
+      adviceWrap.appendChild(labelEl);
+      adviceWrap.appendChild(bodyEl);
+      contentEl.appendChild(adviceWrap);
+
       [...tabsEl.children].forEach((btn) =>
         btn.classList.toggle("active", btn.dataset.key === key)
       );

@@ -1,4 +1,12 @@
-"""Claude-generated Vedic astrology interpretation, split into five sections."""
+"""Claude-generated Vedic astrology interpretation.
+
+Each of the five topics (personality/career/wealth/relationship/current_period)
+is generated as two separate fields — an "insight" (the chart-based analysis,
+always free) and "advice" (the concrete actionable suggestions, gated behind
+payment). This split exists specifically so the free preview can show the
+full analysis for every topic instead of a blind teaser, while the thing
+users actually pay for is the "so what do I do about it" payoff.
+"""
 from __future__ import annotations
 
 import json
@@ -14,6 +22,15 @@ MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 
 _client: anthropic.Anthropic | None = None
 
+TOPICS = ["personality", "career", "wealth", "relationship", "current_period"]
+TOPIC_LABELS_ZH = {
+    "personality": "性格",
+    "career": "事业",
+    "wealth": "财富",
+    "relationship": "感情/人际",
+    "current_period": "近况",
+}
+
 
 def _get_client() -> anthropic.Anthropic:
     global _client
@@ -22,53 +39,67 @@ def _get_client() -> anthropic.Anthropic:
     return _client
 
 
-OUTPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
+def _build_output_schema() -> dict:
+    properties = {
         "tagline": {
             "type": "string",
             "description": "一句可独立摘出、适合截图分享的金句（不超过28个汉字），"
             "提炼命盘中最具辨识度的一点特质或当前运势的一个亮点，语气生动、不落俗套",
         },
-        "personality": {"type": "string", "description": "性格板块解读"},
-        "career": {"type": "string", "description": "事业板块解读"},
-        "wealth": {"type": "string", "description": "财富板块解读"},
-        "relationship": {"type": "string", "description": "感情/人际板块解读"},
-        "current_period": {"type": "string", "description": "近况/当前大运小运板块解读"},
-    },
-    "required": ["tagline", "personality", "career", "wealth", "relationship", "current_period"],
-    "additionalProperties": False,
-}
+    }
+    required = ["tagline"]
+    for topic in TOPICS:
+        label = TOPIC_LABELS_ZH[topic]
+        properties[f"{topic}_insight"] = {
+            "type": "string",
+            "description": f"{label}板块——命盘依据与分析，不含具体建议",
+        }
+        properties[f"{topic}_advice"] = {
+            "type": "string",
+            "description": f"{label}板块——具体可执行建议（可选附传统调整参考）",
+        }
+        required += [f"{topic}_insight", f"{topic}_advice"]
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required,
+        "additionalProperties": False,
+    }
+
+
+OUTPUT_SCHEMA = _build_output_schema()
 
 
 def _build_system_prompt(is_minor: bool) -> str:
     base = (
         "你是一位精通印度吠陀占星学(Jyotish)的资深占星解读师，正在为用户提供的这一张具体命盘"
         "（本命盘 D1 数据 + 当前维姆什塔利大运/小运 Vimshottari Dasha 数据）撰写中文解读。"
-        "\n\n写作铁律，必须严格遵守：\n"
-        "1. 具体化，杜绝巴纳姆效应——每个板块必须明确点出至少2个具体的命盘依据"
+        "\n\n解读分五个主题：性格、事业、财富、感情/人际、近况。每个主题都要分别输出两段内容："
+        "一段是'_insight'（命盘分析），一段是'_advice'（可执行建议）。这两段的分工必须严格区分：\n"
+        "'_insight'只负责讲清楚命盘显示了什么、为什么——不能包含任何'你应该做什么'式的建议。\n"
+        "'_advice'只负责给出接下来具体要做的事，不需要重复解释命盘依据（前面已经讲过了）。\n\n"
+        "写作铁律，必须严格遵守：\n"
+        "1. insight 部分要具体化，杜绝巴纳姆效应——必须明确点出至少2个具体的命盘依据"
         "（某行星+星座+宫位，或某行星+星宿），并说清楚这个依据具体是怎么导向你给出的结论的。"
         "绝不能写换成任何人的命盘都成立的空泛描述，比如'你外表冷静内心敏感''你渴望被理解和认可'"
         "'你是个复杂矛盾的人'这类不结合命盘细节、放之四海而皆准的套话——这类话读者只会觉得"
-        "'说的好像是我又好像谁都是'，必须避免。\n"
-        "2. 说人话，别故弄玄虚——用日常、具体、口语化的中文表达，多用'比如'引出具体的生活场景"
-        "（工作汇报、和伴侣吵架时、发工资那天、跟朋友借钱等），少用抽象的宇宙隐喻、哲学化措辞，"
-        "以及'能量''频率''课题''疗愈''觉醒'这类玄学黑话堆砌。宁可写得直白甚至略显朴素，"
-        "也不要写得像格言警句或心灵鸡汤，一个没学过占星的人也要能一读就懂。\n"
-        "3. 一定要给可执行建议——每个板块结尾必须给1-2条具体、可操作的建议，写清楚'做什么'，"
-        "而不是'要多沟通''要注意平衡'这种空话；建议要能落实成具体动作"
-        "（比如具体的沟通方式、具体的记账/理财动作、具体可以调整的习惯或可以留意的信号），"
-        "并且要和该板块前面引用的命盘依据挂钩，让人一看就懂'为什么建议是这个'。在与财富、事业、"
-        "近况相关、且命盘中能看出明显行星弱势或不利配置的地方，可以在可执行建议之外，额外补充"
-        "一条传统吠陀占星的调整参考（比如适合的颜色、宝石、适合行动的星期几，或者一个简单的"
-        "居家/随身调整），但必须清楚标注这是'传统习俗参考'，语气上是温和的可选建议，绝不能写成"
-        "'不做就会怎样'这种制造焦虑、逼人行动的口吻，也不能暗示这能替代医疗、法律或财务专业建议。\n"
-        "4. 别写成体检报告或问题诊断书——每个板块不能通篇都是'哪里有问题、要注意什么风险、"
-        "要怎么纠正'，必须结合命盘里真实存在的强项、有利配置或即将到来的机会点，"
-        "明确写出至少一处'这是你的优势，可以主动去用/去争取'或'接下来这段时间有什么具体"
-        "值得期待、可以主动把握的事'，要让读的人读完除了知道要注意什么，也对自己和接下来"
-        "有真实依据的盼头，而不是只剩下一堆要改的毛病。current_period 板块尤其要写清楚"
-        "近期命盘里有支撑的、具体可以期待或主动争取的机会，不能只谈风险和辛苦。\n\n"
+        "'说的好像是我又好像谁都是'，必须避免。insight 部分还必须结合命盘里真实存在的强项、"
+        "有利配置或即将到来的机会点，明确写出至少一处'这是你的优势'或'接下来这段时间有什么"
+        "值得期待的事'，不能通篇只谈问题和风险。current_period_insight 尤其要写清楚近期命盘里"
+        "有支撑的、具体可以期待的机会，不能只谈辛苦。\n"
+        "2. 说人话，别故弄玄虚——insight 和 advice 都要用日常、具体、口语化的中文表达，多用"
+        "'比如'引出具体的生活场景（工作汇报、和伴侣吵架时、发工资那天、跟朋友借钱等），少用"
+        "抽象的宇宙隐喻、哲学化措辞，以及'能量''频率''课题''疗愈''觉醒'这类玄学黑话堆砌。"
+        "宁可写得直白甚至略显朴素，也不要写得像格言警句或心灵鸡汤，一个没学过占星的人也要能"
+        "一读就懂。\n"
+        "3. advice 部分必须给1-2条具体、可操作的建议，写清楚'做什么'，而不是'要多沟通''要注意"
+        "平衡'这种空话；建议要能落实成具体动作（比如具体的沟通方式、具体的记账/理财动作、具体"
+        "可以调整的习惯或可以留意的信号），并且要和对应 insight 里引用的命盘依据挂钩，让人一看"
+        "就懂'为什么建议是这个'。在财富、事业、近况这三个主题里，如果对应的命盘中能看出明显的"
+        "行星弱势或不利配置，可以在可执行建议之外，额外补充一条传统吠陀占星的调整参考（比如"
+        "适合的颜色、宝石、适合行动的星期几，或者一个简单的居家/随身调整），但必须清楚标注这是"
+        "'传统习俗参考'，语气上是温和的可选建议，绝不能写成'不做就会怎样'这种制造焦虑、逼人"
+        "行动的口吻，也不能暗示这能替代医疗、法律或财务专业建议。\n\n"
         "语言温和、有洞察力，呈现命盘的倾向与可能性，而不是绝对化的宿命论断言；"
         "不提供具体的医疗、法律或投资建议。"
     )
@@ -79,8 +110,8 @@ def _build_system_prompt(is_minor: bool) -> str:
             "内容聚焦：孩子的性格特质与天赋倾向、成长与理财观念的启蒙方向、"
             "孩子的人际相处与情感表达方式(不涉及婚恋、不做感情关系分析)、"
             "以及当前所处成长阶段可能出现的状态与家长可以关注的重点。"
-            "'relationship'板块请围绕孩子的人际交往与情绪特点撰写，而非爱情关系。"
-            "'career'板块请围绕孩子的学业方向、学习特长、以及未来可能适合发展的领域来写，"
+            "感情/人际相关的两个字段请围绕孩子的人际交往与情绪特点撰写，而非爱情关系。"
+            "事业相关的两个字段请围绕孩子的学业方向、学习特长、以及未来可能适合发展的领域来写，"
             "不谈'事业''跳槽''创业'这类成人语境的内容。"
             "给家长的建议同样要具体可执行（比如可以怎么跟孩子聊、可以给孩子安排什么样的小任务或"
             "环境，而不是'多陪伴孩子'这种空话）。"
@@ -96,30 +127,27 @@ def _build_user_prompt(chart_summary: str, dasha_summary: str, name: str | None)
         f"{who}"
         f"本命盘数据：\n{chart_summary}\n\n"
         f"当前大运/小运数据：\n{dasha_summary}\n\n"
-        "请生成：一句话金句(tagline)，以及五个板块——性格(personality)、事业(career，需结合"
-        "第10宫及相关行星配置说明适合的发展方向、天赋优势，以及近期是否有适合主动争取、调整或"
-        "留意的信号；命主是未成年人时改为学业方向与学习特长)、财富(wealth)、感情或人际"
-        "(relationship)、近况(current_period，需结合当前大运/小运说明近期整体运势走向与需要"
-        "关注的重点)。每个板块正文约250-400字，其中包含：至少2个具体命盘依据（点名某行星+"
-        "星座+宫位，或某行星+星宿）、依据如何导向结论的说明、至少一处基于命盘依据的真实优势或"
-        "值得期待的机会点、以及结尾1-2条与依据挂钩的具体可执行建议——不能写成清一色的问题诊断"
-        "和风险提示。current_period 板块的建议要结合当前大运/小运的星体特质来给，并且要明确"
+        "请生成：一句话金句(tagline)，以及五个主题各自的 insight 和 advice 两段内容——"
+        "性格(personality)、事业(career，需结合第10宫及相关行星配置说明适合的发展方向、天赋"
+        "优势，以及近期是否有适合主动争取、调整或留意的信号；命主是未成年人时改为学业方向与"
+        "学习特长)、财富(wealth)、感情或人际(relationship)、近况(current_period，insight 部分"
+        "需结合当前大运/小运说明近期整体运势走向)。每个主题的 insight 正文约200-300字，包含"
+        "至少2个具体命盘依据（点名某行星+星座+宫位，或某行星+星宿）、依据如何导向结论的说明、"
+        "以及至少一处基于命盘依据的真实优势或值得期待的机会点——insight 里不要出现具体的"
+        "行动建议。每个主题的 advice 正文约80-150字，给出1-2条与对应 insight 依据挂钩的具体"
+        "可执行建议。current_period 的 advice 要结合当前大运/小运的星体特质来给，并且要明确"
         "指出近期具体可以主动把握的机会，不只是要规避的风险。全程用日常口语化的中文，不要写成"
         "格言或空泛的哲学感悟。"
     )
 
 
-# Minimum acceptable length per field (chars). tagline is intentionally short
-# (<=28 Chinese characters by design) so it needs a much lower bar than the
-# five long-form sections, which always run several hundred characters.
-_MIN_FIELD_LENGTH = {
-    "tagline": 5,
-    "personality": 150,
-    "career": 150,
-    "wealth": 150,
-    "relationship": 150,
-    "current_period": 150,
-}
+# Minimum acceptable length per field (chars). tagline and *_advice are
+# intentionally shorter than *_insight, which always runs a couple hundred
+# characters by design.
+_MIN_FIELD_LENGTH: dict[str, int] = {"tagline": 5}
+for _topic in TOPICS:
+    _MIN_FIELD_LENGTH[f"{_topic}_insight"] = 120
+    _MIN_FIELD_LENGTH[f"{_topic}_advice"] = 30
 
 
 def _call_claude(

@@ -396,7 +396,29 @@ table.chart-table th {
   white-space: pre-wrap;
 }
 
-.tab-content.locked {
+.tab-insight {
+  white-space: pre-wrap;
+}
+
+.tab-advice {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.tab-advice-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--accent-2);
+  margin-bottom: 6px;
+}
+
+.tab-advice-body {
+  white-space: pre-wrap;
+}
+
+.tab-advice.locked .tab-advice-label,
+.tab-advice.locked .tab-advice-body {
   color: var(--text-dim);
 }
 

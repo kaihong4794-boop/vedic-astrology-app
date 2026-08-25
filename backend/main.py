@@ -101,30 +101,23 @@ def _point_to_dict(p: astrology.Point) -> dict:
     }
 
 
-def _teaser(text_val: str | None, max_chars: int = 70) -> str:
-    """Free-preview snippet of a section — cut short, not the full text."""
-    text_val = (text_val or "").strip()
-    if len(text_val) <= max_chars:
-        return text_val
-    return text_val[:max_chars].rstrip() + "……"
-
-
 def _reading_response(
     *,
     token: str,
     paid: bool,
     chart_payload: dict,
     tagline: str | None,
-    personality: str | None,
-    career: str | None,
-    wealth: str | None,
-    relationship: str | None,
-    current_period: str | None,
+    fields: dict,
 ) -> dict:
-    """Shared shape for both POST /api/chart and GET /api/reading/{token} —
-    the interpretation is only included in full once `paid` is true; until
-    then callers only get the tagline (always free) plus a short teaser of
-    every other section, so there's something real to judge before paying.
+    """Shared shape for both POST /api/chart and GET /api/reading/{token}.
+
+    `fields` holds the 10 `{topic}_insight` / `{topic}_advice` values —
+    either straight from a freshly generated `reading` dict, or pulled off
+    a stored DB row. The chart-based "insight" (what the chart shows and
+    why) is always free and shown in full for every topic — that's the
+    point of splitting insight from advice, so the free preview no longer
+    needs an arbitrary character-count teaser. Only "advice" (the concrete
+    actionable suggestions) is gated behind `paid`.
     """
     resp = {
         **chart_payload,
@@ -133,21 +126,12 @@ def _reading_response(
         "price_rm": _UNLOCK_PRICE_RM,
         "interpretation_preview": {
             "tagline": tagline,
-            "personality_teaser": _teaser(personality),
-            "career_teaser": _teaser(career),
-            "wealth_teaser": _teaser(wealth),
-            "relationship_teaser": _teaser(relationship),
-            "current_period_teaser": _teaser(current_period),
+            **{f"{t}_insight": fields.get(f"{t}_insight") for t in interpretation.TOPICS},
         },
     }
     if paid:
-        resp["interpretation"] = {
-            "tagline": tagline,
-            "personality": personality,
-            "career": career,
-            "wealth": wealth,
-            "relationship": relationship,
-            "current_period": current_period,
+        resp["interpretation_advice"] = {
+            f"{t}_advice": fields.get(f"{t}_advice") for t in interpretation.TOPICS
         }
     return resp
 
@@ -288,7 +272,7 @@ def api_chart(req: ChartRequest, request: Request):
         },
     }
 
-    token = db.record_reading({
+    db_payload = {
         "name": req.name,
         "birth_date": req.birth_date,
         "birth_time": req.birth_time,
@@ -302,12 +286,12 @@ def api_chart(req: ChartRequest, request: Request):
         "ascendant_degree": astrology.format_degree(chart.ascendant.sign_degree),
         "chart_json": json.dumps(chart_payload),
         "tagline": reading.get("tagline"),
-        "personality": reading.get("personality"),
-        "career": reading.get("career"),
-        "wealth": reading.get("wealth"),
-        "relationship": reading.get("relationship"),
-        "current_period": reading.get("current_period"),
-    })
+    }
+    for t in interpretation.TOPICS:
+        db_payload[f"{t}_insight"] = reading.get(f"{t}_insight")
+        db_payload[f"{t}_advice"] = reading.get(f"{t}_advice")
+
+    token = db.record_reading(db_payload)
     if token is None:
         # Without a saved row there's no token to unlock later, so this
         # can't be papered over the way a lost history row could be.
@@ -318,11 +302,7 @@ def api_chart(req: ChartRequest, request: Request):
         paid=False,
         chart_payload=chart_payload,
         tagline=reading.get("tagline"),
-        personality=reading.get("personality"),
-        career=reading.get("career"),
-        wealth=reading.get("wealth"),
-        relationship=reading.get("relationship"),
-        current_period=reading.get("current_period"),
+        fields=reading,
     )
 
 
@@ -332,16 +312,16 @@ def api_reading_get(token: str):
     if row is None:
         raise HTTPException(404, "找不到这份解读，链接可能已失效")
     chart_payload = json.loads(row.chart_json) if row.chart_json else {}
+    fields = {}
+    for t in interpretation.TOPICS:
+        fields[f"{t}_insight"] = getattr(row, f"{t}_insight", None)
+        fields[f"{t}_advice"] = getattr(row, f"{t}_advice", None)
     return _reading_response(
         token=row.token,
         paid=row.paid,
         chart_payload=chart_payload,
         tagline=row.tagline,
-        personality=row.personality,
-        career=row.career,
-        wealth=row.wealth,
-        relationship=row.relationship,
-        current_period=row.current_period,
+        fields=fields,
     )
 
 
@@ -424,6 +404,17 @@ def admin_list(_: None = Depends(_require_admin)):
         minor_badge = (
             '<span style="color:#cf8b78">未成年</span>' if r.is_minor else ""
         )
+        paid_badge = (
+            '<span style="color:#7cc47f">已付款</span>' if r.paid else '<span style="color:#8f81b3">未付款</span>'
+        )
+        topic_html = ""
+        for topic, label in interpretation.TOPIC_LABELS_ZH.items():
+            insight = getattr(r, f"{topic}_insight", "") or ""
+            advice = getattr(r, f"{topic}_advice", "") or ""
+            topic_html += (
+                f"<p><b>{html.escape(label)} · 分析</b><br>{html.escape(insight)}</p>"
+                f"<p><b>{html.escape(label)} · 建议</b><br>{html.escape(advice)}</p>"
+            )
         row_html.append(f"""
         <tr>
           <td>{html.escape(created)}</td>
@@ -432,15 +423,12 @@ def admin_list(_: None = Depends(_require_admin)):
           <td>{html.escape(r.birth_place or "-")}</td>
           <td>{html.escape(r.ascendant_sign or "")} {html.escape(r.ascendant_degree or "")}</td>
           <td>{minor_badge}</td>
+          <td>{paid_badge}</td>
           <td>{html.escape(r.tagline or "")}</td>
           <td>
             <details>
               <summary>查看</summary>
-              <p><b>性格</b><br>{html.escape(r.personality or "")}</p>
-              <p><b>事业</b><br>{html.escape(r.career or "")}</p>
-              <p><b>财富</b><br>{html.escape(r.wealth or "")}</p>
-              <p><b>感情/人际</b><br>{html.escape(r.relationship or "")}</p>
-              <p><b>近况</b><br>{html.escape(r.current_period or "")}</p>
+              {topic_html}
             </details>
           </td>
         </tr>
@@ -468,7 +456,7 @@ def admin_list(_: None = Depends(_require_admin)):
         <thead>
           <tr>
             <th>时间</th><th>姓名</th><th>生日</th><th>出生地</th>
-            <th>上升</th><th></th><th>金句</th><th>解读</th>
+            <th>上升</th><th></th><th>付款</th><th>金句</th><th>解读</th>
           </tr>
         </thead>
         <tbody>

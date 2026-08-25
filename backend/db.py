@@ -78,11 +78,16 @@ class Reading(Base):
     chart_json = Column(Text, nullable=True)
 
     tagline = Column(Text)
-    personality = Column(Text)
-    career = Column(Text)
-    wealth = Column(Text)
-    relationship = Column(Text)
-    current_period = Column(Text)
+    personality_insight = Column(Text)
+    personality_advice = Column(Text)
+    career_insight = Column(Text)
+    career_advice = Column(Text)
+    wealth_insight = Column(Text)
+    wealth_advice = Column(Text)
+    relationship_insight = Column(Text)
+    relationship_advice = Column(Text)
+    current_period_insight = Column(Text)
+    current_period_advice = Column(Text)
 
 
 def _ensure_columns() -> None:
@@ -103,7 +108,21 @@ def _ensure_columns() -> None:
         "paid": "BOOLEAN DEFAULT FALSE",
         "bill_code": "VARCHAR(50)",
         "chart_json": "TEXT",
+        # Legacy single-field columns from before the insight/advice split —
+        # kept here (rather than removed) so a still-running old process
+        # writing to these names during a rolling deploy wouldn't 500; safe
+        # to drop from a future migration once that's no longer a concern.
         "career": "TEXT",
+        "personality_insight": "TEXT",
+        "personality_advice": "TEXT",
+        "career_insight": "TEXT",
+        "career_advice": "TEXT",
+        "wealth_insight": "TEXT",
+        "wealth_advice": "TEXT",
+        "relationship_insight": "TEXT",
+        "relationship_advice": "TEXT",
+        "current_period_insight": "TEXT",
+        "current_period_advice": "TEXT",
     }
     with _engine.begin() as conn:
         for col, ddl_type in additions.items():
