@@ -92,7 +92,14 @@ async def create_bill(
         "billPhone": "0100000000",
         "billSplitPayment": 0,
         "billPaymentChannel": "0",  # 0 = FPX + credit card
-        "billContentEmail": "Thank you for your purchase. Your full reading is now unlocked.",
+        # Includes the reading's own link so the payer can get back to their
+        # unlocked reading later even if they never bookmark the browser
+        # tab — there's no login system, so this email is the only durable
+        # way back to a paid reading once it's closed.
+        "billContentEmail": (
+            "Thank you for your purchase. Your full reading is now unlocked.\n\n"
+            f"View it anytime here: {return_url}"
+        ),
         "billChargeToCustomer": 1,
     }
     try:

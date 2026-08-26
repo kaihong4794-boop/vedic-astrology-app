@@ -55,8 +55,20 @@
     if (!q) return;
     cityResults.innerHTML = "<li>搜索中...</li>";
     cityResults.classList.remove("hidden");
+
+    // Render's free tier puts the server to sleep after ~15 min idle, so
+    // the very first request after a lull can take 20-50s just to wake it
+    // up — without this, that delay looks identical to "broken" since the
+    // message never changes. Swap to a reassuring, specific message once
+    // it's clearly not a normal-speed response.
+    const slowNoticeTimer = setTimeout(() => {
+      cityResults.innerHTML =
+        "<li>服务器可能刚睡醒，正在加载中，最多可能要等 30-50 秒，请耐心等一下……</li>";
+    }, 4000);
+
     try {
       const resp = await fetch(`/api/geocode?q=${encodeURIComponent(q)}`);
+      clearTimeout(slowNoticeTimer);
       if (!resp.ok) throw new Error((await resp.json()).detail || "搜索失败");
       const results = await resp.json();
       if (!results.length) {
@@ -71,6 +83,7 @@
         cityResults.appendChild(li);
       }
     } catch (err) {
+      clearTimeout(slowNoticeTimer);
       cityResults.innerHTML = `<li>${err.message}</li>`;
     }
   }
