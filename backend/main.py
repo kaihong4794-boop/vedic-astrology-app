@@ -482,3 +482,10 @@ if FRONTEND_DIR.exists():
             str(FRONTEND_DIR / "index.html"),
             headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
         )
+
+    @app.get("/privacy")
+    def privacy():
+        return FileResponse(
+            str(FRONTEND_DIR / "privacy.html"),
+            headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
+        )

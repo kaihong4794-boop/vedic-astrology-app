@@ -7,11 +7,20 @@ echo.
 git add -A
 git commit -m "update code"
 echo.
-echo Pushing (force, this machine's copy wins)...
-git push --force
-echo.
-echo ============================
-echo  Done. If you don't see a red "error" line above, it worked.
-echo  You can close this window now.
-echo ============================
+echo Pushing...
+git push
+if errorlevel 1 (
+    echo.
+    echo ============================
+    echo  Something went wrong - see the red text above.
+    echo  Don't worry, your changes are safe on this computer,
+    echo  nothing was lost. Copy this whole window's text and
+    echo  send it to Claude so it can help fix it.
+    echo ============================
+) else (
+    echo.
+    echo ============================
+    echo  Done. It worked - you can close this window now.
+    echo ============================
+)
 pause
