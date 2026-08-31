@@ -14,7 +14,7 @@ services:
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: CLAUDE_MODEL
-        value: claude-sonnet-5
+        value: claude-opus-5
       - key: PYTHON_VERSION
         value: 3.11.16
       - key: ADMIN_PASSWORD

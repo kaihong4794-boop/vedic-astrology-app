@@ -18,7 +18,7 @@ import anthropic
 
 logger = logging.getLogger("vedic_astrology.interpretation")
 
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 
 _client: anthropic.Anthropic | None = None
 
