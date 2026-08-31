@@ -149,7 +149,7 @@ def health():
 # single-instance deployment that's enough to block casual abuse. If this
 # ever needs to survive restarts or multiple instances, move the counters to
 # the database/Redis instead of this in-process dict.
-_CHART_RATE_LIMIT_MAX = int(os.environ.get("CHART_RATE_LIMIT_PER_HOUR", "8"))
+_CHART_RATE_LIMIT_MAX = int(os.environ.get("CHART_RATE_LIMIT_PER_HOUR", "20"))
 _CHART_RATE_LIMIT_WINDOW_SECONDS = 3600
 _chart_request_log: dict[str, list[float]] = defaultdict(list)
 _chart_rate_lock = threading.Lock()

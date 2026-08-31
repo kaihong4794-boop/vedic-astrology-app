@@ -18,7 +18,7 @@ import anthropic
 
 logger = logging.getLogger("vedic_astrology.interpretation")
 
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
+MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 
 _client: anthropic.Anthropic | None = None
 
@@ -162,10 +162,10 @@ def _call_claude(
     try:
         response = client.messages.create(
             # max_tokens covers thinking + the JSON response together (thinking
-            # is on by default for claude-opus-5), so this needs real headroom
-            # — too tight a budget silently truncates the JSON mid-field, and
-            # the API doesn't always report that as stop_reason=="max_tokens"
-            # (see _is_incomplete below).
+            # may be on by default depending on the model), so this needs real
+            # headroom — too tight a budget silently truncates the JSON
+            # mid-field, and the API doesn't always report that as
+            # stop_reason=="max_tokens" (see _is_incomplete below).
             model=MODEL,
             max_tokens=16000,
             system=_build_system_prompt(is_minor),

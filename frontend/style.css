@@ -70,7 +70,17 @@ body {
   display: flex;
   gap: 14px;
 }
-.field-row .field { flex: 1; }
+.field-row .field { flex: 1; min-width: 0; }
+
+@media (max-width: 480px) {
+  .field-row {
+    flex-direction: column;
+    gap: 16px;
+  }
+  .time-select-row {
+    max-width: none;
+  }
+}
 
 label {
   display: block;
