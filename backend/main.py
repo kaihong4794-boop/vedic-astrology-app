@@ -88,6 +88,38 @@ def _calc_age(birth: date, today: date) -> float:
     return days / 365.2425
 
 
+def _interpretation_cache_key(
+    *,
+    name: str,
+    birth_date: str,
+    birth_time: str,
+    lat: float,
+    lon: float,
+    timezone: str,
+    is_minor: bool,
+) -> str:
+    """Key identifying "the exact same reading request" for caching purposes.
+
+    lat/lon are rounded to 4 decimal places (~11m) so trivially different
+    floats returned by the geocoder for what is really "the same place"
+    still collide, while genuinely different places don't. `name` is
+    included (normalized) because it's passed to Claude as context and can
+    affect phrasing — this keeps the cache from ever mixing up two
+    different people who happen to share a birth date/time/place.
+    """
+    return "|".join(
+        [
+            name.strip().casefold(),
+            birth_date,
+            birth_time,
+            f"{round(lat, 4)}",
+            f"{round(lon, 4)}",
+            timezone,
+            "minor" if is_minor else "adult",
+        ]
+    )
+
+
 def _point_to_dict(p: astrology.Point) -> dict:
     return {
         "name": p.name,
@@ -225,13 +257,25 @@ def api_chart(req: ChartRequest, request: Request):
     chart_summary = astrology.chart_summary_zh(chart)
     dasha_summary = dasha.dasha_summary_zh(birth_dt_utc, chart.moon_longitude, now_utc)
 
-    try:
-        reading = interpretation.generate_interpretation(
-            chart_summary, dasha_summary, is_minor, req.name
-        )
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("interpretation generation failed")
-        raise HTTPException(502, f"生成解读失败: {exc}") from exc
+    cache_key = _interpretation_cache_key(
+        name=req.name,
+        birth_date=req.birth_date,
+        birth_time=req.birth_time,
+        lat=req.lat,
+        lon=req.lon,
+        timezone=req.timezone,
+        is_minor=is_minor,
+    )
+    reading = db.get_cached_interpretation(cache_key)
+    if reading is None:
+        try:
+            reading = interpretation.generate_interpretation(
+                chart_summary, dasha_summary, is_minor, req.name
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("interpretation generation failed")
+            raise HTTPException(502, f"生成解读失败: {exc}") from exc
+        db.save_cached_interpretation(cache_key, reading)
 
     order = ["Sun", "Moon", "Mars", "Mercury", "Jupiter", "Venus", "Saturn", "Rahu", "Ketu"]
     planets_out = [_point_to_dict(chart.planets[n]) for n in order]

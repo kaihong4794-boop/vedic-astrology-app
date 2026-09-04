@@ -12,6 +12,7 @@ preview.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import uuid
@@ -88,6 +89,61 @@ class Reading(Base):
     relationship_advice = Column(Text)
     current_period_insight = Column(Text)
     current_period_advice = Column(Text)
+
+
+class InterpretationCache(Base):
+    """Caches the AI-generated tagline/insight/advice text keyed by the exact
+    chart-defining inputs (birth date/time/location/timezone/minor status/
+    name).
+
+    The chart math itself (astrology.compute_chart) is already deterministic
+    — the same birth data always yields the same ascendant/planets. But the
+    interpretation text is written fresh by Claude on every /api/chart call,
+    and an LLM does not return identical wording for identical input. Without
+    this cache, submitting the exact same birth data twice (a user testing
+    the app, or genuinely coming back) produces two differently-worded
+    readings, which reads as inconsistent/unreliable even though the
+    underlying astrology is correct both times. Caching also skips a
+    redundant paid Claude API call for a repeat submission.
+    """
+
+    __tablename__ = "interpretation_cache"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    cache_key = Column(String(160), unique=True, index=True, nullable=False)
+    reading_json = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(dt_timezone.utc))
+
+
+def get_cached_interpretation(cache_key: str) -> dict | None:
+    with _SessionLocal() as session:
+        stmt = select(InterpretationCache).where(InterpretationCache.cache_key == cache_key)
+        row = session.scalars(stmt).first()
+        if row is None:
+            return None
+        try:
+            return json.loads(row.reading_json)
+        except ValueError:
+            logger.exception("corrupt cached interpretation for key %s", cache_key)
+            return None
+
+
+def save_cached_interpretation(cache_key: str, reading: dict) -> None:
+    try:
+        with _SessionLocal() as session:
+            # Another concurrent request may have cached the same key first
+            # (e.g. two near-simultaneous submissions of the same birth
+            # data) — don't overwrite, first write wins, table has a unique
+            # index on cache_key anyway so this also avoids an IntegrityError.
+            existing = session.scalars(
+                select(InterpretationCache).where(InterpretationCache.cache_key == cache_key)
+            ).first()
+            if existing is not None:
+                return
+            session.add(InterpretationCache(cache_key=cache_key, reading_json=json.dumps(reading)))
+            session.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("failed to save cached interpretation for key %s", cache_key)
 
 
 def _ensure_columns() -> None:
